@@ -106,7 +106,7 @@ input[type="search"] {
 .bar .score { font-weight: 600; }
 .photo { margin: 0; background: var(--rule); position: relative; }
 .photo img {
-  display: block; width: 100%; height: 44vh; min-height: 220px; max-height: 520px;
+  display: block; width: 100%; height: 38vh; min-height: 200px; max-height: 480px;
   object-fit: cover; cursor: zoom-in;
 }
 .credit { font-size: .72rem; color: var(--muted); padding: 4px 16px 0; }

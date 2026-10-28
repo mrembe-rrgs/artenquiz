@@ -350,8 +350,14 @@ async function startRound() {
     if (!session.pool.length) {
       return showSetup("Für diese Auswahl gibt es bei iNaturalist keine Arten mit Foto. Wähle eine größere Gruppe oder einen anderen Ort.");
     }
-    if (!avail.length) { session.seen.clear(); avail = session.pool.slice(); restarted = true; }
-    const picked = weightedSample(avail, ROUND_SIZE);
+    // kleine Auswahl: mit schon gespielten Arten auffüllen
+    let picked = weightedSample(avail, ROUND_SIZE);
+    if (picked.length < ROUND_SIZE && session.pool.length > picked.length) {
+      const ids = new Set(picked.map(p => p.taxon.id));
+      picked = picked.concat(weightedSample(session.pool.filter(p => !ids.has(p.taxon.id)), ROUND_SIZE - picked.length));
+      restarted = true;
+      session.seen.clear();
+    }
     picked.forEach(p => session.seen.add(p.taxon.id));
 
     showLoading("Systematik wird geladen");
@@ -488,7 +494,7 @@ function updateQuiz(item, trail, panel, scoreEl) {
   trail.replaceChildren(...item.questions.map((q, i) => {
     let cls = "later", value = "…", it = false;
     if (q.skip === "missing") { cls = "free"; value = "fehlt"; }
-    else if (q.skip === "only") { cls = "free"; value = q.correct.name; it = ITALIC.has(q.rank); }
+    else if (q.skip === "only") { if (i < item.step) { cls = "free"; value = q.correct.name; it = ITALIC.has(q.rank); } }
     else if (q.answer != null) { cls = q.answer === q.correct.id ? "ok" : "bad"; value = q.correct.name; it = ITALIC.has(q.rank); }
     else if (i === item.step) { cls = "now"; value = "?"; }
     return h("li", { class: cls },
@@ -570,7 +576,7 @@ function showEnd() {
   $app.replaceChildren(h("main", { class: "end" },
     h("h1", { text: "Runde geschafft" }),
     h("p", { class: "lead", text: `Du hast ${r.score} von ${r.possible} Fragen richtig beantwortet (${pct} %).` +
-      (r.restarted ? " Alle Arten dieser Auswahl waren schon einmal dran, deshalb ging es von vorne los." : "") }),
+      (r.restarted ? " Diese Auswahl hat nur wenige Arten, deshalb waren einige schon einmal dran." : "") }),
     h("ol", { class: "results" }, r.items.map(it => h("li", {},
       h("img", { src: photoUrl(it.photo, "square") || "", alt: "", loading: "lazy" }),
       h("div", { class: "info" }, taxonEl(it.taxon),
