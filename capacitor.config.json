@@ -1,0 +1,8 @@
+{
+  "appId": "de.artenquiz.app",
+  "appName": "Artenquiz",
+  "webDir": "www",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "auto"
+  }
+}
