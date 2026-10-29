@@ -13,12 +13,16 @@ const QuizData = (() => {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const slim = t => ({ id: t.id, name: t.name, rank: t.rank, common: t.preferred_common_name || null });
-  const userError = msg => Object.assign(new Error(msg), { userMessage: msg, retry: false });
+  const userError = (key, ...args) => Object.assign(new Error(key), { userKey: key, userArgs: args, retry: false });
 
+  // Sprache für Trivialnamen (iNaturalist) und Wikipedia; Texte kommen aus i18n.js
+  let lang = "de";
+  const tr = (key, ...a) => (typeof I18N !== "undefined" ? I18N.t(key, ...a) : key);
+  function setLang(l) { lang = l === "en" ? "en" : "de"; }
   function friendly(e) {
-    if (e && e.userMessage) return e.userMessage;
-    if (e && e.name === "AbortError") return "iNaturalist antwortet gerade nicht. Versuche es gleich noch einmal.";
-    return "Keine Verbindung zu iNaturalist. Prüfe die Internetverbindung und versuche es erneut.";
+    if (e && e.userKey) return tr(e.userKey, ...(e.userArgs || []));
+    if (e && e.name === "AbortError") return tr("errTimeout");
+    return tr("errOffline");
   }
 
   // ---------- Netz: eine Warteschlange, Drosselung, bis zu 3 Versuche ----------
@@ -32,7 +36,7 @@ const QuizData = (() => {
         requests++;
         const u = new URL(API + path);
         for (const [k, v] of Object.entries(params)) if (v != null && v !== "") u.searchParams.set(k, v);
-        u.searchParams.set("locale", "de");
+        u.searchParams.set("locale", lang);
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 20000);
         try {
@@ -40,9 +44,8 @@ const QuizData = (() => {
           if (r.ok) return await r.json();
           const err = new Error("HTTP " + r.status);
           err.retry = r.status === 429 || r.status >= 500;
-          err.userMessage = r.status === 429
-            ? "iNaturalist bremst gerade zu viele Anfragen. Warte eine Minute und versuche es erneut."
-            : `iNaturalist meldet einen Fehler (${r.status}). Versuche es später erneut.`;
+          if (r.status === 429) err.userKey = "err429";
+          else { err.userKey = "errHttp"; err.userArgs = [r.status]; }
           throw err;
         } catch (e) {
           if (e.retry === false || attempt >= 2) throw e;
@@ -80,7 +83,7 @@ const QuizData = (() => {
     const d = await api("/taxa", { q: name, rank, is_active: "true", per_page: 10 });
     const lc = name.toLowerCase();
     const t = (d.results || []).find(x => x.rank === rank && x.name.toLowerCase() === lc);
-    if (!t) throw userError(`${name} wurde bei iNaturalist nicht gefunden.`);
+    if (!t) throw userError("notFound", name);
     return slim(t);
   }
   const PLACE_DE = {
@@ -102,7 +105,7 @@ const QuizData = (() => {
     const d = await api("/places/autocomplete", { q: query, per_page: 5 });
     const res = d.results || [];
     const p = res.find(x => (x.name || "").toLowerCase() === query.toLowerCase()) || res[0];
-    if (!p) throw userError(`${label || query} wurde bei iNaturalist nicht gefunden.`);
+    if (!p) throw userError("notFound", label || query);
     return { id: p.id, name: label || p.display_name || p.name };
   }
 
@@ -186,7 +189,6 @@ const QuizData = (() => {
       taxon: slim(t), count: p.count, chain, levels,
       plantLike: (t.ancestor_ids || p.taxon.ancestor_ids || []).some(id => PLANT_LIKE.includes(id)),
       photo: ph ? { url: ph.medium_url || ph.url, attribution: ph.attribution || "", license: ph.license_code || "" } : null,
-      wikipedia: "https://de.wikipedia.org/w/index.php?go=Artikel&search=" + encodeURIComponent(t.name),
       inat: "https://www.inaturalist.org/taxa/" + t.id,
       questions: null, step: 0, prep: null
     };
@@ -321,14 +323,17 @@ const QuizData = (() => {
     return out;
   }
   const wikiCache = new Map();
-  /* Sucht den Artikel: deutscher Artikel zum wissenschaftlichen Namen, dann zum deutschen Namen
-     (nur wenn der Gattungsname im Text vorkommt), dann englischer Artikel. null = keiner gefunden. */
+  const wikiSearchUrl = name => `https://${lang}.wikipedia.org/w/index.php?search=${encodeURIComponent(name)}`;
+  /* Sucht den Artikel in der eingestellten Sprache: zum wissenschaftlichen Namen, dann zum Trivialnamen
+     (nur wenn der Gattungsname im Text vorkommt), dann in der anderen Sprache. null = keiner gefunden. */
   function wikipedia(taxon) {
-    if (!wikiCache.has(taxon.id)) {
+    const key = lang + "|" + taxon.id;
+    const main = lang, other = lang === "de" ? "en" : "de";
+    if (!wikiCache.has(key)) {
       const p = (async () => {
-        let page = await wikiPage("de", taxon.name);
-        if (!page && taxon.common) page = await wikiPage("de", taxon.common, taxon.name.split(" ")[0]);
-        if (!page) page = await wikiPage("en", taxon.name);
+        let page = await wikiPage(main, taxon.name);
+        if (!page && taxon.common) page = await wikiPage(main, taxon.common, taxon.name.split(" ")[0]);
+        if (!page) page = await wikiPage(other, taxon.name);
         if (!page) return null;
         let image = null;
         if (page.imageName) { try { image = await wikiImage(page.lang, page.imageName); } catch { /* Bild ohne Angaben */ } }
@@ -337,14 +342,14 @@ const QuizData = (() => {
         if (!body.textContent.trim()) return null;
         return { lang: page.lang, title: page.title, url: page.url, image, body };
       })();
-      p.catch(() => wikiCache.delete(taxon.id));
-      wikiCache.set(taxon.id, p);
+      p.catch(() => wikiCache.delete(key));
+      wikiCache.set(key, p);
     }
-    return wikiCache.get(taxon.id);
+    return wikiCache.get(key);
   }
 
   return {
-    LIFE, RANKS, ITALIC, api, fetchTaxa, friendly, wikipedia,
+    LIFE, RANKS, ITALIC, api, fetchTaxa, friendly, wikipedia, wikiSearchUrl, setLang,
     searchGroup, findTaxon, searchPlace, findPlace,
     newSession, newRound, prepare, nextOpen, shuffle,
     requestCount: () => requests

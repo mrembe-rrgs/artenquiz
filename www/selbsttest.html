@@ -26,29 +26,53 @@
 </head>
 <body>
 <main class="st" id="st">
-  <a class="back" href="index.html">Zurück zur App</a>
-  <h1>Datenquelle prüfen</h1>
-  <p class="lead">Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Prüft auch, ob Wikipedia-Artikel gefunden werden. Dauert etwa 5 bis 7 Minuten.</p>
-  <button class="btn" id="run" type="button">Test starten</button>
-  <button class="btn secondary" id="save" type="button" disabled>Ergebnis speichern</button>
+  <a class="back" href="index.html" data-i18n="back">Zurück zur App</a>
+  <h1 data-i18n="title">Datenquelle prüfen</h1>
+  <p class="lead" data-i18n="lead">Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Prüft auch, ob Wikipedia-Artikel gefunden werden. Dauert etwa 5 bis 7 Minuten.</p>
+  <button class="btn" id="run" type="button" data-i18n="run">Test starten</button>
+  <button class="btn secondary" id="save" type="button" disabled data-i18n="save">Ergebnis speichern</button>
   <p class="hint" id="status" aria-live="polite" style="margin-top:12px"></p>
   <div id="cases"></div>
 </main>
+<script src="i18n.js"></script>
 <script src="data.js"></script>
 <script>
 "use strict";
 const PER_CASE = 8;
+// Sprache aus den App-Einstellungen übernehmen
+let LANG = "de";
+try { LANG = (JSON.parse(localStorage.getItem("artenquiz.settings")) || {}).lang || I18N.detect(); } catch { LANG = I18N.detect(); }
+if (LANG !== "en") LANG = "de";
+I18N.setLang(LANG); QuizData.setLang(LANG);
+const ST = {
+  de: { back: "Zurück zur App", title: "Datenquelle prüfen", run: "Test starten", save: "Ergebnis speichern",
+    lead: "Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Prüft auch, ob Wikipedia-Artikel gefunden werden. Dauert etwa 5 bis 7 Minuten.",
+    waiting: "wartet", running: "läuft …", ok: "in Ordnung", warn: "mit Hinweisen", bad: "Problem", error: "Fehler",
+    checking: (i, n, name) => `Prüfe ${i} von ${n}: ${name} …`,
+    done: (s, r) => `Fertig nach ${s} s und ${r} Anfragen. Speichere das Ergebnis und schick es mir, wenn etwas auffällt.`,
+    facts: (pool, items, req, sec, reg) => `Pool ${pool} Arten mit Foto · ${items} geprüft · ${req} Anfragen · ${sec} s · Falschantworten aus der Region: ${reg} %`,
+    wiki: (f, c, m) => ` · Wikipedia: ${f} von ${c} gefunden, ${m} in der eingestellten Sprache`, sample: "Beispiel: ", more: n => `… und ${n} weitere` },
+  en: { back: "Back to the app", title: "Check data source", run: "Start test", save: "Save result",
+    lead: "Plays through several groups of plants, animals and fungi with live iNaturalist data, no input needed. It reports missing ranks, too few wrong answers, or missing photos, and checks whether Wikipedia articles are found. Takes about 5 to 7 minutes.",
+    waiting: "waiting", running: "running …", ok: "fine", warn: "with notes", bad: "problem", error: "error",
+    checking: (i, n, name) => `Checking ${i} of ${n}: ${name} …`,
+    done: (s, r) => `Done after ${s} s and ${r} requests. Save the result and send it if anything looks off.`,
+    facts: (pool, items, req, sec, reg) => `Pool ${pool} species with photos · ${items} checked · ${req} requests · ${sec} s · wrong answers from the region: ${reg}%`,
+    wiki: (f, c, m) => ` · Wikipedia: ${f} of ${c} found, ${m} in the chosen language`, sample: "Example: ", more: n => `… and ${n} more` }
+}[LANG];
+document.title = ST.title;
+document.querySelectorAll("[data-i18n]").forEach(e => { e.textContent = ST[e.dataset.i18n]; });
 const CASES = [
-  { title: "Süßgrasartige (Poales)", desc: "Pflanzen · Familie bis Art · Deutschland, heimisch", group: ["Poales", "order"], oben: "family", unten: "species", place: "Germany", native: true },
-  { title: "Korbblütler (Asteraceae)", desc: "Pflanzen, sehr viele Gattungen · Gattung bis Art · Deutschland", group: ["Asteraceae", "family"], oben: "genus", unten: "species", place: "Germany", native: false },
-  { title: "Käfer (Coleoptera)", desc: "Tiere · Familie bis Art · Deutschland, heimisch", group: ["Coleoptera", "order"], oben: "family", unten: "species", place: "Germany", native: true },
-  { title: "Vögel (Aves)", desc: "Tiere · Ordnung bis Art · Europa", group: ["Aves", "class"], oben: "order", unten: "species", place: "Europe", native: false },
-  { title: "Schmetterlinge (Lepidoptera)", desc: "Tiere · Familie bis Gattung · Deutschland", group: ["Lepidoptera", "order"], oben: "family", unten: "genus", place: "Germany", native: false },
-  { title: "Champignonartige (Agaricales)", desc: "Pilze · Familie bis Art · Deutschland", group: ["Agaricales", "order"], oben: "family", unten: "species", place: "Germany", native: false },
-  { title: "Pilze (Fungi)", desc: "Pilze · Abteilung bis Art · Deutschland", group: ["Fungi", "kingdom"], oben: "phylum", unten: "species", place: "Germany", native: false },
-  { title: "Alle Lebewesen", desc: "Reich bis Klasse · weltweit", group: null, oben: "kingdom", unten: "class", place: null, native: false },
-  { title: "Rohrkolben (Typha)", desc: "Kleine Gruppe · nur Art · Deutschland", group: ["Typha", "genus"], oben: "species", unten: "species", place: "Germany", native: false }
-];
+  { title: ["Süßgrasartige (Poales)", "Grasses and sedges (Poales)"], desc: ["Pflanzen · Familie bis Art · Deutschland, heimisch", "Plants · family to species · Germany, native"], group: ["Poales", "order"], oben: "family", unten: "species", place: "Germany", native: true },
+  { title: ["Korbblütler (Asteraceae)", "Daisy family (Asteraceae)"], desc: ["Pflanzen, sehr viele Gattungen · Gattung bis Art · Deutschland", "Plants, very many genera · genus to species · Germany"], group: ["Asteraceae", "family"], oben: "genus", unten: "species", place: "Germany", native: false },
+  { title: ["Käfer (Coleoptera)", "Beetles (Coleoptera)"], desc: ["Tiere · Familie bis Art · Deutschland, heimisch", "Animals · family to species · Germany, native"], group: ["Coleoptera", "order"], oben: "family", unten: "species", place: "Germany", native: true },
+  { title: ["Vögel (Aves)", "Birds (Aves)"], desc: ["Tiere · Ordnung bis Art · Europa", "Animals · order to species · Europe"], group: ["Aves", "class"], oben: "order", unten: "species", place: "Europe", native: false },
+  { title: ["Schmetterlinge (Lepidoptera)", "Butterflies and moths (Lepidoptera)"], desc: ["Tiere · Familie bis Gattung · Deutschland", "Animals · family to genus · Germany"], group: ["Lepidoptera", "order"], oben: "family", unten: "genus", place: "Germany", native: false },
+  { title: ["Champignonartige (Agaricales)", "Gilled mushrooms (Agaricales)"], desc: ["Pilze · Familie bis Art · Deutschland", "Fungi · family to species · Germany"], group: ["Agaricales", "order"], oben: "family", unten: "species", place: "Germany", native: false },
+  { title: ["Pilze (Fungi)", "Fungi"], desc: ["Pilze · Abteilung bis Art · Deutschland", "Fungi · phylum to species · Germany"], group: ["Fungi", "kingdom"], oben: "phylum", unten: "species", place: "Germany", native: false },
+  { title: ["Alle Lebewesen", "All living things"], desc: ["Reich bis Klasse · weltweit", "Kingdom to class · worldwide"], group: null, oben: "kingdom", unten: "class", place: null, native: false },
+  { title: ["Rohrkolben (Typha)", "Cattails (Typha)"], desc: ["Kleine Gruppe · nur Art · Deutschland", "Small group · species only · Germany"], group: ["Typha", "genus"], oben: "species", unten: "species", place: "Germany", native: false }
+].map(c => ({ ...c, title: c.title[LANG === "en" ? 1 : 0], desc: c.desc[LANG === "en" ? 1 : 0] }));
 const $ = id => document.getElementById(id);
 const RANKS = QuizData.RANKS;
 let report = null;
@@ -56,8 +80,9 @@ let report = null;
 function caseEl(c, i) {
   const el = document.createElement("div");
   el.className = "case"; el.id = "case" + i;
-  el.innerHTML = '<div class="head"><span class="name"></span><span class="state">wartet</span></div><div class="desc"></div><div class="body"></div>';
+  el.innerHTML = '<div class="head"><span class="name"></span><span class="state"></span></div><div class="desc"></div><div class="body"></div>';
   el.querySelector(".name").textContent = c.title;
+  el.querySelector(".state").textContent = ST.waiting;
   el.querySelector(".desc").textContent = c.desc;
   return el;
 }
@@ -67,14 +92,14 @@ function fill(i, res) {
   body.replaceChildren();
   const facts = document.createElement("div");
   facts.className = "sample";
-  facts.textContent = `Pool ${res.poolSize} Arten mit Foto · ${res.items} geprüft · ${res.requests} Anfragen · ${res.seconds} s · Falschantworten aus der Region: ${res.regionalShare} %` +
-    (res.wiki ? ` · Wikipedia: ${res.wiki.found} von ${res.wiki.checked} gefunden, ${res.wiki.german} auf Deutsch` : "");
+  facts.textContent = ST.facts(res.poolSize, res.items, res.requests, res.seconds, res.regionalShare) +
+    (res.wiki ? ST.wiki(res.wiki.found, res.wiki.checked, res.wiki.german) : "");
   body.append(facts);
-  if (res.sample) { const s = document.createElement("div"); s.className = "sample"; s.textContent = "Beispiel: " + res.sample; body.append(s); }
+  if (res.sample) { const s = document.createElement("div"); s.className = "sample"; s.textContent = ST.sample + res.sample; body.append(s); }
   if (res.issues.length) {
     const ul = document.createElement("ul");
     for (const m of res.issues.slice(0, 8)) { const li = document.createElement("li"); li.textContent = m; ul.append(li); }
-    if (res.issues.length > 8) { const li = document.createElement("li"); li.textContent = `… und ${res.issues.length - 8} weitere`; ul.append(li); }
+    if (res.issues.length > 8) { const li = document.createElement("li"); li.textContent = ST.more(res.issues.length - 8); ul.append(li); }
     body.append(ul);
   }
 }
@@ -118,7 +143,7 @@ async function runCase(c) {
     wikiChecked++;
     try {
       const w = await QuizData.wikipedia(it.taxon);
-      if (w) { wikiFound++; if (w.lang === "de") wikiDe++; if (!w.image) issues.push(`${it.taxon.name}: Wikipedia-Artikel ohne Bild.`); }
+      if (w) { wikiFound++; if (w.lang === LANG) wikiDe++; if (!w.image) issues.push(`${it.taxon.name}: Wikipedia-Artikel ohne Bild.`); }
       else issues.push(`${it.taxon.name}: kein Wikipedia-Artikel gefunden.`);
     } catch (e) { wikiError = String(e && e.message); }
   }
@@ -139,25 +164,25 @@ async function runCase(c) {
 $("cases").replaceChildren(...CASES.map(caseEl));
 $("run").addEventListener("click", async () => {
   $("run").disabled = true; $("save").disabled = true;
-  report = { startedAt: new Date().toISOString(), userAgent: navigator.userAgent, cases: [] };
+  report = { startedAt: new Date().toISOString(), userAgent: navigator.userAgent, lang: LANG, cases: [] };
   const t0 = Date.now();
   for (let i = 0; i < CASES.length; i++) {
-    $("status").textContent = `Prüfe ${i + 1} von ${CASES.length}: ${CASES[i].title} …`;
-    setState(i, "", "läuft …");
+    $("status").textContent = ST.checking(i + 1, CASES.length, CASES[i].title);
+    setState(i, "", ST.running);
     try {
       const res = await runCase(CASES[i]);
       report.cases.push({ title: CASES[i].title, ...res });
-      setState(i, res.level, res.level === "ok" ? "in Ordnung" : res.level === "warn" ? "mit Hinweisen" : "Problem");
+      setState(i, res.level, ST[res.level]);
       fill(i, res);
     } catch (e) {
       report.cases.push({ title: CASES[i].title, error: QuizData.friendly(e), raw: String(e && e.message) });
-      setState(i, "bad", "Fehler");
+      setState(i, "bad", ST.error);
       $("case" + i).querySelector(".body").textContent = QuizData.friendly(e);
     }
   }
   report.seconds = Math.round((Date.now() - t0) / 1000);
   report.requests = QuizData.requestCount();
-  $("status").textContent = `Fertig nach ${report.seconds} s und ${report.requests} Anfragen. Speichere das Ergebnis und schick es mir, wenn etwas auffällt.`;
+  $("status").textContent = ST.done(report.seconds, report.requests);
   $("run").disabled = false; $("save").disabled = false;
 });
 $("save").addEventListener("click", () => {

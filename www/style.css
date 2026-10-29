@@ -91,6 +91,9 @@ a { color: var(--action); }
 /* ---------- Auswahl ---------- */
 .setup { padding: 20px 16px 28px; }
 .masthead { margin-bottom: 26px; }
+.masthead-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.langs { display: flex; gap: 4px; }
+.chip.small { padding: 4px 10px; font-size: .8rem; }
 .masthead h1 { font-family: var(--serif); font-weight: 600; font-size: 2.1rem; line-height: 1.1; margin: 10px 0 6px; letter-spacing: -.01em; }
 .masthead .lead { color: var(--muted); margin: 0; max-width: 32em; }
 .field { margin: 0 0 24px; }

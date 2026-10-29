@@ -3,25 +3,19 @@
 
 const { RANKS, ITALIC } = QuizData;
 const ROUND_SIZE = 15;
-const RANK = {
-  kingdom: { label: "Reich", ask: "Zu welchem Reich gehört diese Art?", within: "In welchem Reich?" },
-  phylum: { label: "Abteilung/Stamm", within: "In welcher Abteilung bzw. welchem Stamm?" },
-  class: { label: "Klasse", ask: "Zu welcher Klasse gehört diese Art?", within: "In welcher Klasse?" },
-  order: { label: "Ordnung", ask: "Zu welcher Ordnung gehört diese Art?", within: "In welcher Ordnung?" },
-  family: { label: "Familie", ask: "Zu welcher Familie gehört diese Art?", within: "In welcher Familie?" },
-  genus: { label: "Gattung", ask: "Zu welcher Gattung gehört diese Art?", within: "In welcher Gattung?" },
-  species: { label: "Art", ask: "Welche Art ist das?" }
-};
-// Vorschläge je Rang der Gruppe: [wissenschaftlicher Name, deutsche Bezeichnung]
+const t = I18N.t;
+// Vorschläge je Rang der Gruppe: [wissenschaftlicher Name, deutsch, englisch]
 const SUGGEST = {
-  kingdom: [["Animalia", "Tiere"], ["Plantae", "Pflanzen"], ["Fungi", "Pilze"]],
-  phylum: [["Chordata", "Chordatiere"], ["Arthropoda", "Gliederfüßer"], ["Mollusca", "Weichtiere"], ["Tracheophyta", "Gefäßpflanzen"], ["Basidiomycota", "Ständerpilze"]],
-  class: [["Aves", "Vögel"], ["Mammalia", "Säugetiere"], ["Insecta", "Insekten"], ["Magnoliopsida", "Zweikeimblättrige"], ["Agaricomycetes", "Agaricomycetes (Pilze)"]],
-  order: [["Poales", "Süßgrasartige"], ["Lepidoptera", "Schmetterlinge"], ["Coleoptera", "Käfer"], ["Passeriformes", "Sperlingsvögel"], ["Agaricales", "Champignonartige"], ["Boletales", "Dickröhrlingsartige"]],
-  family: [["Asteraceae", "Korbblütler"], ["Orchidaceae", "Orchideen"], ["Carabidae", "Laufkäfer"], ["Anatidae", "Entenvögel"], ["Boletaceae", "Dickröhrlingsverwandte"]],
-  genus: [["Carex", "Seggen"], ["Quercus", "Eichen"], ["Bombus", "Hummeln"], ["Amanita", "Wulstlinge"]]
+  kingdom: [["Animalia", "Tiere", "Animals"], ["Plantae", "Pflanzen", "Plants"], ["Fungi", "Pilze", "Fungi"]],
+  phylum: [["Chordata", "Chordatiere", "Chordates"], ["Arthropoda", "Gliederfüßer", "Arthropods"], ["Mollusca", "Weichtiere", "Molluscs"], ["Tracheophyta", "Gefäßpflanzen", "Vascular plants"], ["Basidiomycota", "Ständerpilze", "Basidiomycetes"]],
+  class: [["Aves", "Vögel", "Birds"], ["Mammalia", "Säugetiere", "Mammals"], ["Insecta", "Insekten", "Insects"], ["Magnoliopsida", "Zweikeimblättrige", "Dicots"], ["Agaricomycetes", "Agaricomycetes (Pilze)", "Agaricomycetes (fungi)"]],
+  order: [["Poales", "Süßgrasartige", "Grasses and sedges"], ["Lepidoptera", "Schmetterlinge", "Butterflies and moths"], ["Coleoptera", "Käfer", "Beetles"], ["Passeriformes", "Sperlingsvögel", "Perching birds"], ["Agaricales", "Champignonartige", "Gilled mushrooms"], ["Boletales", "Dickröhrlingsartige", "Boletes"]],
+  family: [["Asteraceae", "Korbblütler", "Daisy family"], ["Orchidaceae", "Orchideen", "Orchids"], ["Carabidae", "Laufkäfer", "Ground beetles"], ["Anatidae", "Entenvögel", "Ducks, geese and swans"], ["Boletaceae", "Dickröhrlingsverwandte", "Boletes"]],
+  genus: [["Carex", "Seggen", "Sedges"], ["Quercus", "Eichen", "Oaks"], ["Bombus", "Hummeln", "Bumblebees"], ["Amanita", "Wulstlinge", "Amanitas"]]
 };
-const QUICK_PLACES = [["Deutschland", "Germany"], ["Europa", "Europe"]];
+// Schnellwahl Orte: [Suchbegriff bei iNaturalist, deutsch, englisch]
+const QUICK_PLACES = [["Germany", "Deutschland", "Germany"], ["Europe", "Europa", "Europe"]];
+const byLang = (de, en) => I18N.lang === "en" ? en : de;
 
 // ---------- Helfer ----------
 const $app = document.getElementById("app");
@@ -45,12 +39,14 @@ function taxonEl(t, showCommon = true) {
     showCommon && t.common ? h("span", { class: "common", text: t.common }) : null);
 }
 function rankLabel(rank, plantLike) {
-  if (rank === "phylum") return plantLike === undefined ? RANK.phylum.label : plantLike ? "Abteilung" : "Stamm";
-  return RANK[rank].label;
+  const R = t("rank");
+  if (rank === "phylum") return plantLike === undefined ? R.phylum : plantLike ? R.phylumPlant : R.phylumAnimal;
+  return R[rank];
 }
 function rankAsk(rank, plantLike) {
-  if (rank === "phylum") return plantLike ? "Zu welcher Abteilung gehört diese Art?" : "Zu welchem Stamm gehört diese Art?";
-  return RANK[rank].ask;
+  const A = t("ask");
+  if (rank === "phylum") return plantLike ? A.phylumPlant : A.phylumAnimal;
+  return A[rank];
 }
 const photoUrl = (p, size) => p && p.url ? p.url.replace(/\/(square|small|medium|large|original)\./, `/${size}.`) : "";
 const store = {
@@ -64,8 +60,12 @@ function openExternal(url) {
 }
 
 // ---------- Zustand ----------
-const DEFAULTS = { oben: "family", unten: "species", group: null, place: null, native: true, showCommon: true, wiki: true };
+const DEFAULTS = { oben: "family", unten: "species", group: null, place: null, native: true, showCommon: true, wiki: true, lang: null };
 let settings = Object.assign({}, DEFAULTS, store.get("settings", {}));
+if (!settings || typeof settings !== "object") settings = Object.assign({}, DEFAULTS);
+if (settings.lang !== "de" && settings.lang !== "en") settings.lang = I18N.detect();
+I18N.setLang(settings.lang);
+QuizData.setLang(settings.lang);
 if (!RANKS.includes(settings.oben) || !RANKS.includes(settings.unten)) Object.assign(settings, { oben: DEFAULTS.oben, unten: DEFAULTS.unten });
 if (settings.group && settings.group.rank !== groupRankFor(settings.oben)) settings.group = null;
 let stats = Object.assign({ rounds: 0, answered: 0, correct: 0, best: 0 }, store.get("stats", {}));
@@ -75,6 +75,32 @@ let screen = "setup", gen = 0, session = null, sessionKey = null, round = null, 
 const saveSettings = () => store.set("settings", settings);
 const levelsNow = () => RANKS.slice(RANKS.indexOf(settings.oben), RANKS.indexOf(settings.unten) + 1);
 const groupNow = () => groupRankFor(settings.oben) ? settings.group : QuizData.LIFE;
+
+// ---------- Sprache ----------
+async function switchLang(l) {
+  if (l === settings.lang) return;
+  settings.lang = l;
+  I18N.setLang(l); QuizData.setLang(l);
+  saveSettings(); showSetup();
+  // Trivialname der gewählten Gruppe in der neuen Sprache nachladen
+  const g = settings.group;
+  if (g) {
+    try {
+      const fresh = await QuizData.findTaxon(g.name, g.rank);
+      if (settings.group && settings.group.id === g.id && settings.lang === l) {
+        settings.group = fresh; saveSettings();
+        if (screen === "setup") showSetup();
+      }
+    } catch { /* alter Name bleibt stehen */ }
+  }
+}
+function langSwitch() {
+  return h("div", { class: "langs", role: "group", "aria-label": t("language") },
+    I18N.LANGS.map(([code, name]) => h("button", {
+      type: "button", class: "chip small" + (settings.lang === code ? " on" : ""), lang: code,
+      "aria-pressed": String(settings.lang === code), onclick: () => switchLang(code)
+    }, name)));
+}
 
 // ---------- Auswahl ----------
 function searchBox({ placeholder, search, onPick, render }) {
@@ -89,12 +115,12 @@ function searchBox({ placeholder, search, onPick, render }) {
     if (q.length < 2) { list.replaceChildren(); note.textContent = ""; return; }
     timer = setTimeout(async () => {
       const my = ++token;
-      note.textContent = "Suche läuft …";
+      note.textContent = t("searching");
       try {
         const items = await search(q);
         if (my !== token) return;
         list.replaceChildren(...items.map(it => h("button", { type: "button", class: "suggest-item", onclick: () => onPick(it) }, render(it))));
-        note.textContent = items.length ? "" : "Nichts gefunden. Probiere den wissenschaftlichen Namen.";
+        note.textContent = items.length ? "" : t("nothingFound");
       } catch (e) {
         if (my === token) note.textContent = QuizData.friendly(e);
       }
@@ -114,74 +140,76 @@ function showSetup(message) {
   const levels = levelsNow();
 
   const stepsField = h("section", { class: "field" },
-    h("h2", { text: "Was willst du bestimmen?" }),
+    h("h2", { text: t("stepsQ") }),
     h("div", { class: "range" },
-      h("label", {}, h("span", { text: "Von" }), rankSelect("oben", settings.oben, 0, r => {
+      h("label", {}, h("span", { text: t("from") }), rankSelect("oben", settings.oben, 0, r => {
         settings.oben = r;
         if (RANKS.indexOf(settings.unten) < RANKS.indexOf(r)) settings.unten = r;
         if (settings.group && settings.group.rank !== groupRankFor(r)) settings.group = null;
         saveSettings(); showSetup();
       })),
-      h("label", {}, h("span", { text: "Bis" }), rankSelect("unten", settings.unten, RANKS.indexOf(settings.oben), r => {
+      h("label", {}, h("span", { text: t("to") }), rankSelect("unten", settings.unten, RANKS.indexOf(settings.oben), r => {
         settings.unten = r; saveSettings(); showSetup();
       }))),
-    h("ol", { class: "trail preview", "aria-label": "Diese Stufen fragt das Quiz ab" },
+    h("ol", { class: "trail preview", "aria-label": t("previewAria") },
       levels.map(r => h("li", { class: "later" }, h("span", { class: "dot" }), h("span", { class: "v", text: rankLabel(r) })))));
 
   let groupField;
   if (!gr) {
-    groupField = h("section", { class: "field" }, h("h2", { text: "Gruppe" }),
-      h("p", { class: "hint", text: "Ab dem Reich spielst du mit allen Lebewesen." }));
+    groupField = h("section", { class: "field" }, h("h2", { text: t("group") }),
+      h("p", { class: "hint", text: t("allLife") }));
   } else if (settings.group) {
-    groupField = h("section", { class: "field" }, h("h2", { text: RANK[gr].within }),
+    groupField = h("section", { class: "field" }, h("h2", { text: t("within")[gr] }),
       h("div", { class: "picked" }, taxonEl(settings.group),
-        h("button", { type: "button", class: "textbtn", onclick: () => { settings.group = null; saveSettings(); showSetup(); } }, "Ändern")));
+        h("button", { type: "button", class: "textbtn", onclick: () => { settings.group = null; saveSettings(); showSetup(); } }, t("change"))));
   } else {
     const note = h("div", { class: "hint", "aria-live": "polite" });
-    groupField = h("section", { class: "field" }, h("h2", { text: RANK[gr].within }),
+    groupField = h("section", { class: "field" }, h("h2", { text: t("within")[gr] }),
       searchBox({
-        placeholder: "Wissenschaftlicher oder deutscher Name",
+        placeholder: t("groupPh"),
         search: q => QuizData.searchGroup(q, gr),
-        onPick: t => { settings.group = t; saveSettings(); showSetup(); },
-        render: t => taxonEl(t)
+        onPick: tx => { settings.group = tx; saveSettings(); showSetup(); },
+        render: tx => taxonEl(tx)
       }),
-      SUGGEST[gr] ? h("div", { class: "chips", style: "margin-top:4px" }, SUGGEST[gr].map(([sci, de]) =>
+      SUGGEST[gr] ? h("div", { class: "chips", style: "margin-top:4px" }, SUGGEST[gr].map(([sci, de, en]) =>
         h("button", {
           type: "button", class: "chip",
           onclick: async () => {
-            note.textContent = `${de} wird gesucht …`;
+            note.textContent = t("lookingUp", byLang(de, en));
             try {
-              const t = await QuizData.findTaxon(sci, gr);
+              const tx = await QuizData.findTaxon(sci, gr);
               if (screen !== "setup") return;
-              settings.group = t; saveSettings(); showSetup();
+              settings.group = tx; saveSettings(); showSetup();
             } catch (e) { note.textContent = QuizData.friendly(e); }
           }
-        }, de))) : null,
+        }, byLang(de, en)))) : null,
       note);
   }
 
   const placeNote = h("div", { class: "hint", "aria-live": "polite" });
-  const other = settings.place && !QUICK_PLACES.some(([l]) => l === settings.place.name);
-  const placeField = h("section", { class: "field" }, h("h2", { text: "Wo soll die Art vorkommen?" }),
+  const quickOn = q => !!settings.place && (settings.place.quick === q[0] || settings.place.name === q[1] || settings.place.name === q[2]);
+  const other = settings.place && !QUICK_PLACES.some(quickOn);
+  const placeField = h("section", { class: "field" }, h("h2", { text: t("placeQ") }),
     h("div", { class: "chips" },
-      h("button", { type: "button", class: "chip" + (!settings.place ? " on" : ""), "aria-pressed": String(!settings.place), onclick: () => { settings.place = null; saveSettings(); showSetup(); } }, "Weltweit"),
-      QUICK_PLACES.map(([label, query]) => {
-        const on = settings.place && settings.place.name === label;
+      h("button", { type: "button", class: "chip" + (!settings.place ? " on" : ""), "aria-pressed": String(!settings.place), onclick: () => { settings.place = null; saveSettings(); showSetup(); } }, t("worldwide")),
+      QUICK_PLACES.map(qp => {
+        const [query, de, en] = qp, label = byLang(de, en);
+        const on = quickOn(qp);
         return h("button", {
           type: "button", class: "chip" + (on ? " on" : ""), "aria-pressed": String(!!on),
           onclick: async () => {
             const cache = store.get("places", {});
             try {
-              if (!cache[query]) { placeNote.textContent = `${label} wird gesucht …`; cache[query] = (await QuizData.findPlace(query, label)).id; store.set("places", cache); }
+              if (!cache[query]) { placeNote.textContent = t("lookingUp", label); cache[query] = (await QuizData.findPlace(query, label)).id; store.set("places", cache); }
               if (screen !== "setup") return;
-              settings.place = { id: cache[query], name: label }; saveSettings(); showSetup();
+              settings.place = { id: cache[query], name: label, quick: query }; saveSettings(); showSetup();
             } catch (e) { placeNote.textContent = QuizData.friendly(e); }
           }
         }, label);
       }),
       other ? h("button", { type: "button", class: "chip on", "aria-pressed": "true" }, settings.place.name) : null),
     h("div", { style: "margin-top:10px" }, searchBox({
-      placeholder: "Anderes Land, Bundesland oder Erdteil",
+      placeholder: t("placePh"),
       search: QuizData.searchPlace,
       onPick: p => { settings.place = p; saveSettings(); showSetup(); },
       render: p => h("span", { text: p.name })
@@ -189,28 +217,28 @@ function showSetup(message) {
     placeNote,
     h("label", { class: "check" + (settings.place ? "" : " off") },
       h("input", { type: "checkbox", checked: settings.native, disabled: !settings.place, onchange: e => { settings.native = e.target.checked; saveSettings(); } }),
-      "Nur dort heimische Arten"));
+      t("nativeOnly")));
 
   const extraField = h("section", { class: "field" },
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: settings.showCommon, onchange: e => { settings.showCommon = e.target.checked; saveSettings(); } }),
-      "Deutsche Namen bei den Antworten zeigen"),
+      t("showCommon")),
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: settings.wiki, onchange: e => { settings.wiki = e.target.checked; saveSettings(); } }),
-      "Nach jeder Art den Wikipedia-Artikel zeigen"));
+      t("showWiki")));
 
   const ready = !gr || !!settings.group;
   const pct = stats.answered ? Math.round(100 * stats.correct / stats.answered) : null;
   $app.replaceChildren(h("main", { class: "setup" },
     h("header", { class: "masthead" },
-      h("h1", { text: "Artenquiz" }),
-      h("p", { class: "lead", text: "Zu jedem Foto bestimmst du Stufe für Stufe, wohin die Art in der Systematik gehört." })),
+      h("div", { class: "masthead-row" }, h("h1", { text: t("appTitle") }), langSwitch()),
+      h("p", { class: "lead", text: t("lead") })),
     stepsField, groupField, placeField, extraField,
     message ? h("p", { class: "error-text", role: "alert", text: message }) : null,
-    h("button", { type: "button", class: "btn", disabled: !ready, onclick: () => startRound() }, "Quiz starten"),
-    !ready ? h("p", { class: "hint center-text", text: "Wähle zuerst eine Gruppe aus." }) : null,
-    pct !== null ? h("p", { class: "stats", text: `${stats.rounds} ${stats.rounds === 1 ? "Runde" : "Runden"} gespielt, ${pct} % richtig, längste Serie ${stats.best}.` }) : null,
-    h("p", { class: "footer" }, h("a", { href: "selbsttest.html" }, "Datenquelle prüfen"), " · Daten und Fotos: iNaturalist")));
+    h("button", { type: "button", class: "btn", disabled: !ready, onclick: () => startRound() }, t("start")),
+    !ready ? h("p", { class: "hint center-text", text: t("pickGroupFirst") }) : null,
+    pct !== null ? h("p", { class: "stats", text: t("stats", stats.rounds, pct, stats.best) }) : null,
+    h("p", { class: "footer" }, h("a", { href: "selbsttest.html" }, t("checkSource")), " · " + t("dataBy"))));
 }
 
 // ---------- Laden, Fehler ----------
@@ -218,33 +246,34 @@ function showLoading(text) {
   screen = "loading";
   $app.replaceChildren(h("main", { class: "center" },
     h("div", { class: "pulse", "aria-hidden": "true" }), h("h1", { text }),
-    h("p", { text: "Die Daten kommen von iNaturalist. Das dauert ein paar Sekunden." }),
-    h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, "Abbrechen")));
+    h("p", { text: t("loadingSub") }),
+    h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, t("cancel"))));
 }
 function showError(e, retry) {
   screen = "error";
   $app.replaceChildren(h("main", { class: "center" },
-    h("h1", { text: "Laden hat nicht geklappt" }), h("p", { role: "alert", text: QuizData.friendly(e) }),
-    h("button", { type: "button", class: "btn", onclick: retry }, "Erneut versuchen"),
-    h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, "Zur Auswahl")));
+    h("h1", { text: t("loadFailed") }), h("p", { role: "alert", text: QuizData.friendly(e) }),
+    h("button", { type: "button", class: "btn", onclick: retry }, t("retry")),
+    h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, t("toSetup"))));
 }
 
 // ---------- Runde ----------
 async function startRound() {
   const my = ++gen;
-  const key = JSON.stringify([groupNow().id, settings.place && settings.place.id, !!(settings.place && settings.native)]);
+  // Sprache gehört zum Schlüssel: Trivialnamen im Artenpool sind sprachabhängig
+  const key = JSON.stringify([groupNow().id, settings.place && settings.place.id, !!(settings.place && settings.native), settings.lang]);
   if (!session || sessionKey !== key) {
     session = QuizData.newSession({ group: groupNow(), place: settings.place, native: settings.native });
     sessionKey = key;
   }
-  showLoading("Arten werden ausgewählt");
+  showLoading(t("loadPicking"));
   try {
     const res = await QuizData.newRound(session, { levels: levelsNow(), size: ROUND_SIZE, missed, isStale: () => my !== gen });
     if (!res || my !== gen) return;
-    if (res.empty) return showSetup("Für diese Auswahl gibt es bei iNaturalist keine Arten mit Foto. Wähle eine größere Gruppe, einen anderen Ort oder schalte „Nur heimische Arten“ aus.");
+    if (res.empty) return showSetup(t("emptyPool"));
     round = { gen: my, items: res.items, repeated: res.repeated, idx: 0, score: 0, possible: 0, streak: 0 };
     prefetch(round);
-    showLoading("Fragen werden vorbereitet");
+    showLoading(t("loadPreparing"));
     await QuizData.prepare(session, round.items[0]);
     if (my !== gen) return;
     showItem();
@@ -266,22 +295,22 @@ async function prefetch(r) {
 async function showItem() {
   const r = round, item = r.items[r.idx];
   if (!item.questions) {
-    showLoading("Nächste Art wird geladen");
+    showLoading(t("loadNext"));
     try { await QuizData.prepare(session, item); } catch (e) { return showError(e, () => showItem()); }
     if (r !== round || r.gen !== gen) return;
   }
   screen = "quiz";
   if (settings.wiki) QuizData.wikipedia(item.taxon).catch(() => {}); // schon während der Fragen laden
-  const img = h("img", { alt: "Foto der gesuchten Art. Antippen zum Vergrößern.", src: photoUrl(item.photo, "large"), onclick: () => openZoom(photoUrl(item.photo, "large")) });
+  const img = h("img", { alt: t("photoAlt"), src: photoUrl(item.photo, "large"), onclick: () => openZoom(photoUrl(item.photo, "large")) });
   img.addEventListener("error", () => { if (item.photo && img.src !== item.photo.url) img.src = item.photo.url; }, { once: true });
   const progress = h("div", { class: "progress", "aria-hidden": "true" },
     r.items.map((it, i) => h("span", { class: i < r.idx ? (it.allRight ? "ok" : "bad") : i === r.idx ? "now" : "" })));
-  const trail = h("ol", { class: "trail", "aria-label": "Bestimmungspfad" });
+  const trail = h("ol", { class: "trail", "aria-label": t("trailAria") });
   const panel = h("section", { class: "panel" });
   const score = h("span", { class: "score" });
   $app.replaceChildren(h("main", { class: "quiz" },
     h("div", { class: "bar" },
-      h("button", { type: "button", class: "textbtn", onclick: confirmQuit }, "Beenden"),
+      h("button", { type: "button", class: "textbtn", onclick: confirmQuit }, t("quit")),
       h("span", { class: "count", text: `${r.idx + 1} / ${r.items.length}` }),
       score),
     progress,
@@ -294,12 +323,12 @@ async function showItem() {
 
 function update(item, ui) {
   const r = round;
-  ui.score.textContent = `${r.score} ${r.score === 1 ? "Punkt" : "Punkte"}`;
+  ui.score.textContent = t("points", r.score);
   const done = item.step >= item.questions.length;
 
   ui.trail.replaceChildren(...item.questions.map((q, i) => {
     let cls = "later", value = "", it = false;
-    if (q.skip === "missing") { if (i < item.step || done) { cls = "free"; value = "ohne Angabe"; } }
+    if (q.skip === "missing") { if (i < item.step || done) { cls = "free"; value = t("noData"); } }
     else if (q.skip === "only") { if (i < item.step || done) { cls = "free"; value = q.correct.name; it = ITALIC.has(q.rank); } }
     else if (q.answer != null) { cls = q.answer === q.correct.id ? "ok" : "bad"; value = q.correct.name; it = ITALIC.has(q.rank); }
     else if (i === item.step) { cls = "now"; value = "?"; }
@@ -314,18 +343,18 @@ function update(item, ui) {
 
   if (done) {
     const last = r.idx >= r.items.length - 1;
-    const wikiLink = h("button", { type: "button", class: "textbtn", onclick: () => openExternal(item.wikipedia) }, "In Wikipedia suchen");
-    const article = settings.wiki ? h("section", { class: "article", "aria-label": "Wikipedia-Artikel", "aria-live": "polite" }) : null;
+    const wikiLink = h("button", { type: "button", class: "textbtn", onclick: () => openExternal(QuizData.wikiSearchUrl(item.taxon.name)) }, t("wikiSearch"));
+    const article = settings.wiki ? h("section", { class: "article", "aria-label": t("wikiAria"), "aria-live": "polite" }) : null;
     ui.panel.replaceChildren(h("div", { class: "reveal" },
       h("h2", { text: item.taxon.name }),
       item.taxon.common ? h("p", { class: "common-big", text: item.taxon.common }) : null,
-      item.questions.some(q => q.skip) ? h("p", { class: "hint", text: "Grau markierte Stufen hatten keine Auswahl und zählen nicht." }) : null,
+      item.questions.some(q => q.skip) ? h("p", { class: "hint", text: t("skippedHint") }) : null,
       h("div", { class: "links" }, wikiLink,
-        h("button", { type: "button", class: "textbtn", onclick: () => openExternal(item.inat) }, "Mehr Fotos auf iNaturalist")),
+        h("button", { type: "button", class: "textbtn", onclick: () => openExternal(item.inat) }, t("moreInat"))),
       article,
       // bleibt beim Lesen des Artikels am unteren Rand
       h("div", { class: "nextbar" },
-        h("button", { type: "button", class: "btn", onclick: () => { if (last) showEnd(); else { r.idx++; showItem(); } } }, last ? "Ergebnis ansehen" : "Nächste Art"))));
+        h("button", { type: "button", class: "btn", onclick: () => { if (last) showEnd(); else { r.idx++; showItem(); } } }, last ? t("seeResults") : t("nextSpecies")))));
     if (article) fillArticle(item, article, wikiLink);
     return;
   }
@@ -343,12 +372,12 @@ function update(item, ui) {
           class: "option" + (o.isCorrect ? " correct" : "") + (chosen ? " chosen" : "") + (chosen && !o.isCorrect ? " wrongpick" : ""),
           onclick: () => answer(item, q, o, ui)
         }, taxonEl(o, settings.showCommon || answered),
-          answered && (o.isCorrect || chosen) ? h("span", { class: "mark", "aria-label": o.isCorrect ? "richtig" : "falsch", text: o.isCorrect ? "✓" : "✗" }) : null);
+          answered && (o.isCorrect || chosen) ? h("span", { class: "mark", "aria-label": o.isCorrect ? t("markRight") : t("markWrong"), text: o.isCorrect ? "✓" : "✗" }) : null);
       })),
     answered ? h("p", { class: "feedback " + (right ? "good" : "bad"), role: "status",
-      text: right ? (r.streak >= 3 ? `Richtig, ${r.streak} in Folge.` : "Richtig.")
-        : `Richtig wäre ${q.correct.name}${q.correct.common ? ` (${q.correct.common})` : ""}.` }) : null,
-    answered && !right ? h("button", { type: "button", class: "btn", onclick: () => next(item, ui) }, "Weiter") : null);
+      text: right ? (r.streak >= 3 ? t("streak", r.streak) : t("correct"))
+        : t("wrongIs", q.correct.name + (q.correct.common ? ` (${q.correct.common})` : "")) }) : null,
+    answered && !right ? h("button", { type: "button", class: "btn", onclick: () => next(item, ui) }, t("continue")) : null);
 }
 
 function answer(item, q, o, ui) {
@@ -386,37 +415,37 @@ function finishItem(item) {
   store.set("missed", missed);
 }
 function confirmQuit() {
-  if (window.confirm("Runde beenden? Diese Runde wird nicht gewertet.")) showSetup();
+  if (window.confirm(t("confirmQuit"))) showSetup();
 }
 async function fillArticle(item, el, wikiLink) {
-  el.replaceChildren(h("p", { class: "hint", text: "Wikipedia-Artikel wird geladen …" }));
+  el.replaceChildren(h("p", { class: "hint", text: t("wikiLoading") }));
   let w;
   try { w = await QuizData.wikipedia(item.taxon); }
-  catch { if (el.isConnected) el.replaceChildren(h("p", { class: "hint", text: "Wikipedia ist gerade nicht erreichbar." })); return; }
+  catch { if (el.isConnected) el.replaceChildren(h("p", { class: "hint", text: t("wikiOffline") })); return; }
   if (!el.isConnected) return;
-  if (!w) { el.replaceChildren(h("p", { class: "hint", text: "Zu dieser Art gibt es keinen Wikipedia-Artikel." })); return; }
-  wikiLink.replaceWith(h("button", { type: "button", class: "textbtn", onclick: () => openExternal(w.url) }, "Artikel in Wikipedia öffnen"));
+  if (!w) { el.replaceChildren(h("p", { class: "hint", text: t("wikiNone") })); return; }
+  wikiLink.replaceWith(h("button", { type: "button", class: "textbtn", onclick: () => openExternal(w.url) }, t("wikiOpen")));
   let fig = null;
   if (w.image && w.image.url) {
-    const img = h("img", { src: w.image.url, alt: `Bild aus dem Wikipedia-Artikel ${w.title}`, loading: "lazy", onclick: () => openZoom(w.image.url) });
+    const img = h("img", { src: w.image.url, alt: t("wikiImgAlt", w.title), loading: "lazy", onclick: () => openZoom(w.image.url) });
     const credit = [w.image.artist, w.image.license].filter(Boolean).join(", ");
-    fig = h("figure", {}, img, credit ? h("figcaption", { text: "Bild: " + credit }) : null);
+    fig = h("figure", {}, img, credit ? h("figcaption", { text: t("imageBy") + credit }) : null);
     img.addEventListener("error", () => fig.remove(), { once: true });
   }
   el.replaceChildren(...[
     h("h3", { class: "article-title", text: w.title }),
-    w.lang !== "de" ? h("p", { class: "hint", text: "Einen deutschen Artikel gibt es nicht, hier der englische." }) : null,
+    w.lang !== settings.lang ? h("p", { class: "hint", text: t("wikiOtherLang") }) : null,
     fig,
     h("div", { class: "article-body", lang: w.lang }, w.body.cloneNode(true)),
-    h("p", { class: "article-source" }, "Text aus dem Wikipedia-Artikel ",
-      h("button", { type: "button", class: "textbtn inline", onclick: () => openExternal(w.url) }, `„${w.title}“`),
-      ", Lizenz CC BY-SA 4.0. Die Autoren stehen in der Versionsgeschichte des Artikels.")
+    h("p", { class: "article-source" }, t("sourcePre"),
+      h("button", { type: "button", class: "textbtn inline", onclick: () => openExternal(w.url) }, t("quote", w.title)),
+      t("sourcePost"))
   ].filter(Boolean));
 }
 
 function openZoom(src) {
   closeZoom();
-  zoomEl = h("div", { class: "zoom", role: "dialog", "aria-label": "Bild in voller Größe, antippen zum Schließen", onclick: closeZoom },
+  zoomEl = h("div", { class: "zoom", role: "dialog", "aria-label": t("zoomAria"), onclick: closeZoom },
     h("img", { src, alt: "" }));
   document.body.append(zoomEl);
 }
@@ -431,19 +460,18 @@ function showEnd() {
   const pct = r.possible ? Math.round(100 * r.score / r.possible) : 0;
   const perfect = r.items.filter(it => it.allRight).length;
   $app.replaceChildren(h("main", { class: "end" },
-    h("h1", { text: pct >= 90 ? "Stark bestimmt" : pct >= 60 ? "Runde geschafft" : "Runde geschafft, weiter üben" }),
-    h("p", { class: "lead", text: `${r.score} von ${r.possible} Fragen richtig (${pct} %). ${perfect} von ${r.items.length} Arten komplett richtig bestimmt.` +
-      (r.repeated ? " Diese Auswahl hat nur wenige Arten, deshalb waren einige schon einmal dran." : "") }),
+    h("h1", { text: pct >= 90 ? t("endGreat") : pct >= 60 ? t("endOk") : t("endPractice") }),
+    h("p", { class: "lead", text: t("endLead", r.score, r.possible, pct, perfect, r.items.length) + (r.repeated ? t("repeated") : "") }),
     h("ol", { class: "results" }, r.items.map(it => h("li", {},
       h("img", { src: photoUrl(it.photo, "square"), alt: "", loading: "lazy" }),
       h("div", { class: "info" }, taxonEl(it.taxon),
         h("div", { class: "marks" }, (it.questions || []).map(q => h("span", {
           class: "m" + (q.skip ? "" : q.answer === q.correct.id ? " ok" : " bad"),
-          title: rankLabel(q.rank, it.plantLike) + (q.skip ? ": ohne Auswahl" : q.answer === q.correct.id ? ": richtig" : ": falsch")
+          title: rankLabel(q.rank, it.plantLike) + (q.skip ? t("markNoChoice") : q.answer === q.correct.id ? t("markRightT") : t("markWrongT"))
         }))))))),
-    h("button", { type: "button", class: "btn", onclick: () => startRound() }, "Nächste Runde"),
-    h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, "Auswahl ändern"),
-    Object.keys(missed).length ? h("p", { class: "hint center-text", text: "Falsch bestimmte Arten kommen in späteren Runden öfter wieder." }) : null));
+    h("button", { type: "button", class: "btn", onclick: () => startRound() }, t("nextRound")),
+    h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, t("changeSetup")),
+    Object.keys(missed).length ? h("p", { class: "hint center-text", text: t("missedHint") }) : null));
   window.scrollTo(0, 0);
 }
 
