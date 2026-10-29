@@ -33,6 +33,8 @@ function h(tag, props, ...kids) {
   for (const k of kids.flat()) if (k != null && k !== false) e.append(k);
   return e;
 }
+// Inhalt ersetzen; leere Einträge (null/false) werden übersprungen statt als Text „null“ zu erscheinen
+const put = (el, ...kids) => el.replaceChildren(...kids.flat().filter(k => k != null && k !== false));
 function taxonEl(t, showCommon = true) {
   return h("span", { class: "taxon" },
     h("span", { class: "sci" + (ITALIC.has(t.rank) ? " it" : ""), text: t.name }),
@@ -60,7 +62,8 @@ function openExternal(url) {
 }
 
 // ---------- Zustand ----------
-const DEFAULTS = { oben: "family", unten: "species", group: null, place: null, native: true, showCommon: true, wiki: true, lang: null, mode: "all" };
+const DEFAULTS = { oben: "family", unten: "species", group: null, place: null, native: true, showCommon: true, wiki: true, lang: null, mode: "all",
+  by: "photo", season: false, field: false, hard: false };
 let settings = Object.assign({}, DEFAULTS, store.get("settings", {}));
 if (!settings || typeof settings !== "object") settings = Object.assign({}, DEFAULTS);
 if (settings.lang !== "de" && settings.lang !== "en") settings.lang = I18N.detect();
@@ -71,6 +74,9 @@ if (settings.group && settings.group.rank !== groupRankFor(settings.oben)) setti
 let stats = Object.assign({ rounds: 0, answered: 0, correct: 0, best: 0 }, store.get("stats", {}));
 let missed = store.get("missed", {});
 if (settings.mode !== "repeat") settings.mode = "all";
+if (settings.by !== "sound") settings.by = "photo";
+const monthNow = () => new Date().getMonth() + 1;
+const monthName = () => new Intl.DateTimeFormat(I18N.lang === "en" ? "en-GB" : "de-DE", { month: "long" }).format(new Date());
 // Lernstapel: { taxonId: { n: Name, c: Trivialname, a: Vorfahren-IDs, t: Zeitpunkt } }
 let stack = store.get("stack", {});
 if (!stack || typeof stack !== "object" || Array.isArray(stack)) stack = {};
@@ -134,14 +140,14 @@ function searchBox({ placeholder, search, onPick, render }) {
     clearTimeout(timer);
     const q = input.value.trim();
     token++;
-    if (q.length < 2) { list.replaceChildren(); note.textContent = ""; return; }
+    if (q.length < 2) { put(list, ); note.textContent = ""; return; }
     timer = setTimeout(async () => {
       const my = ++token;
       note.textContent = t("searching");
       try {
         const items = await search(q);
         if (my !== token) return;
-        list.replaceChildren(...items.map(it => h("button", { type: "button", class: "suggest-item", onclick: () => onPick(it) }, render(it))));
+        put(list, ...items.map(it => h("button", { type: "button", class: "suggest-item", onclick: () => onPick(it) }, render(it))));
         note.textContent = items.length ? "" : t("nothingFound");
       } catch (e) {
         if (my === token) note.textContent = QuizData.friendly(e);
@@ -249,7 +255,23 @@ function showSetup(message) {
       h("button", { type: "button", class: "chip" + (repeat ? " on" : ""), "aria-pressed": String(repeat), onclick: () => { settings.mode = "repeat"; saveSettings(); showSetup(); } }, t("modeRepeat", stackCount))),
     repeat ? h("p", { class: "hint", style: "margin-top:8px", text: stackCount ? t("repeatHint") : t("stackEmptyGroup") }) : null);
 
+  const chipSet = (key, opts) => h("div", { class: "chips" }, opts.map(([val, label]) => h("button", {
+    type: "button", class: "chip" + (settings[key] === val ? " on" : ""), "aria-pressed": String(settings[key] === val),
+    onclick: () => { settings[key] = val; saveSettings(); showSetup(); }
+  }, label)));
+  const byField = h("section", { class: "field" }, h("h2", { text: t("byLabel") }),
+    chipSet("by", [["photo", t("byPhoto")], ["sound", t("bySound")]]),
+    settings.by === "sound" ? h("p", { class: "hint", style: "margin-top:8px", text: t("soundHint") }) : null);
+  const hardField = h("section", { class: "field" }, h("h2", { text: t("difficulty") }),
+    chipSet("hard", [[false, t("easy")], [true, t("hard")]]),
+    settings.hard ? h("p", { class: "hint", style: "margin-top:8px", text: t("hardHint") }) : null);
+  const check = (key, label, disabled) => h("label", { class: "check" + (disabled ? " off" : "") },
+    h("input", { type: "checkbox", checked: !!settings[key], disabled: disabled || null, onchange: e => { settings[key] = e.target.checked; saveSettings(); } }),
+    label);
+
   const extraField = h("section", { class: "field" },
+    check("season", t("seasonOnly", monthName())),
+    settings.by === "photo" ? check("field", t("fieldPhotos")) : null,
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: settings.showCommon, onchange: e => { settings.showCommon = e.target.checked; saveSettings(); } }),
       t("showCommon")),
@@ -259,11 +281,11 @@ function showSetup(message) {
 
   const ready = (!gr || !!settings.group) && !(repeat && stackCount === 0);
   const pct = stats.answered ? Math.round(100 * stats.correct / stats.answered) : null;
-  $app.replaceChildren(h("main", { class: "setup" },
+  put($app, h("main", { class: "setup" },
     h("header", { class: "masthead" },
       h("div", { class: "masthead-row" }, h("h1", { text: t("appTitle") }), langSwitch()),
       h("p", { class: "lead", text: t("lead") })),
-    stepsField, groupField, placeField, modeField, extraField,
+    stepsField, groupField, placeField, modeField, byField, hardField, extraField,
     message ? h("p", { class: "error-text", role: "alert", text: message }) : null,
     h("button", { type: "button", class: "btn", disabled: !ready, onclick: () => startRound() }, t("start")),
     gr && !settings.group ? h("p", { class: "hint center-text", text: t("pickGroupFirst") }) : null,
@@ -274,14 +296,14 @@ function showSetup(message) {
 // ---------- Laden, Fehler ----------
 function showLoading(text) {
   screen = "loading";
-  $app.replaceChildren(h("main", { class: "center" },
+  put($app, h("main", { class: "center" },
     h("div", { class: "pulse", "aria-hidden": "true" }), h("h1", { text }),
     h("p", { text: t("loadingSub") }),
     h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, t("cancel"))));
 }
 function showError(e, retry) {
   screen = "error";
-  $app.replaceChildren(h("main", { class: "center" },
+  put($app, h("main", { class: "center" },
     h("h1", { text: t("loadFailed") }), h("p", { role: "alert", text: QuizData.friendly(e) }),
     h("button", { type: "button", class: "btn", onclick: retry }, t("retry")),
     h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, t("toSetup"))));
@@ -295,16 +317,18 @@ async function startRound() {
   const onlyIds = repeat ? stackIdsIn(groupNow()) : null;
   if (repeat && !onlyIds.length) return showSetup(t("stackEmptyGroup"));
   const key = JSON.stringify([groupNow().id, settings.place && settings.place.id, !!(settings.place && settings.native), settings.lang,
-    settings.mode, repeat ? stackVersion : 0]);
+    settings.mode, repeat ? stackVersion : 0, settings.by, settings.season ? monthNow() : 0, !!settings.field, !!settings.hard]);
   if (!session || sessionKey !== key) {
-    session = QuizData.newSession({ group: groupNow(), place: settings.place, native: settings.native, onlyIds });
+    session = QuizData.newSession({ group: groupNow(), place: settings.place, native: settings.native, onlyIds,
+      month: settings.season ? monthNow() : null, sounds: settings.by === "sound",
+      field: settings.by === "photo" && settings.field, hard: settings.hard });
     sessionKey = key;
   }
   showLoading(t("loadPicking"));
   try {
     const res = await QuizData.newRound(session, { levels: levelsNow(), size: ROUND_SIZE, missed, isStale: () => my !== gen });
     if (!res || my !== gen) return;
-    if (res.empty) return showSetup(repeat ? t("stackNoneHere") : t("emptyPool"));
+    if (res.empty) return showSetup(repeat ? t("stackNoneHere") : session.sounds ? t("noSounds") : session.month ? t("emptySeason") : t("emptyPool"));
     round = { gen: my, items: res.items, repeated: res.repeated, idx: 0, score: 0, possible: 0, streak: 0 };
     prefetch(round);
     showLoading(t("loadPreparing"));
@@ -316,11 +340,12 @@ async function startRound() {
   }
 }
 async function prefetch(r) {
-  for (const it of r.items) {
+  for (const it of r.items.slice()) {
     if (r.gen !== gen) return;
     try {
       await QuizData.prepare(session, it);
-      if (it.photo) { const img = new Image(); img.src = photoUrl(it.photo, "large"); }
+      const first = (it.photos && it.photos[0]) || it.photo;
+      if (first && !session.sounds) { const img = new Image(); img.src = photoUrl(first, "large"); }
     } catch { /* wird beim Anzeigen erneut versucht */ }
   }
 }
@@ -333,26 +358,77 @@ async function showItem() {
     try { await QuizData.prepare(session, item); } catch (e) { return showError(e, () => showItem()); }
     if (r !== round || r.gen !== gen) return;
   }
+  // Geräusch-Modus: Arten ohne abspielbare Aufnahme fallen aus der Runde
+  if (item.unavailable) {
+    r.items.splice(r.idx, 1);
+    if (!r.items.length) return showSetup(t("noSounds"));
+    if (r.idx >= r.items.length) return showEnd();
+    return showItem();
+  }
   screen = "quiz";
   if (settings.wiki) QuizData.wikipedia(item.taxon).catch(() => {}); // schon während der Fragen laden
-  const img = h("img", { alt: t("photoAlt"), src: photoUrl(item.photo, "large"), onclick: () => openZoom(photoUrl(item.photo, "large")) });
-  img.addEventListener("error", () => { if (item.photo && img.src !== item.photo.url) img.src = item.photo.url; }, { once: true });
+  const media = session.sounds ? soundBox(item) : photoBox(item);
   const progress = h("div", { class: "progress", "aria-hidden": "true" },
     r.items.map((it, i) => h("span", { class: i < r.idx ? (it.allRight ? "ok" : "bad") : i === r.idx ? "now" : "" })));
   const trail = h("ol", { class: "trail", "aria-label": t("trailAria") });
   const panel = h("section", { class: "panel" });
   const score = h("span", { class: "score" });
-  $app.replaceChildren(h("main", { class: "quiz" },
+  put($app, h("main", { class: "quiz" },
     h("div", { class: "bar" },
       h("button", { type: "button", class: "textbtn", onclick: confirmQuit }, t("quit")),
       h("span", { class: "count", text: `${r.idx + 1} / ${r.items.length}` }),
       score),
     progress,
-    h("figure", { class: "photo" }, img,
-      item.photo && item.photo.attribution ? h("figcaption", { text: item.photo.attribution + (item.photo.license ? ` (${item.photo.license.toUpperCase()})` : "") }) : null),
+    media,
     trail, panel));
   window.scrollTo(0, 0);
   update(item, { trail, panel, score });
+}
+
+const credit = m => m && m.attribution ? m.attribution + (m.license ? ` (${m.license.toUpperCase()})` : "") : "";
+// Foto mit „anderes Foto“
+function photoBox(item, opts = {}) {
+  const list = item.photos && item.photos.length ? item.photos : item.photo ? [item.photo] : [];
+  let idx = opts.first ? 0 : (item.photoIdx || 0) % Math.max(1, list.length);
+  const img = h("img", { alt: opts.alt || t("photoAlt"), onclick: () => openZoom(photoUrl(list[idx], "large")) });
+  const cap = h("span", { class: "credit-text" });
+  const other = list.length > 1 && !opts.first ? h("button", { type: "button", class: "textbtn small" }) : null;
+  const show = () => {
+    const ph = list[idx];
+    img.src = photoUrl(ph, "large");
+    img.onerror = () => { if (ph && img.src !== ph.url) img.src = ph.url; };
+    cap.textContent = credit(ph);
+    if (other) other.textContent = t("otherPhoto", idx + 2 > list.length ? 1 : idx + 2, list.length);
+  };
+  if (other) other.addEventListener("click", () => { idx = (idx + 1) % list.length; item.photoIdx = idx; show(); });
+  show();
+  return h("figure", { class: "photo" }, img, h("figcaption", {}, cap, other));
+}
+// Tonaufnahme mit „andere Aufnahme“; das Foto bleibt bis zur Auflösung verborgen
+function soundBox(item) {
+  const list = item.sounds || [];
+  let idx = (item.soundIdx || 0) % Math.max(1, list.length);
+  const audio = h("audio", { controls: true, preload: "auto", "aria-label": t("audioAria") });
+  const cap = h("span", { class: "credit-text" });
+  const note = h("p", { class: "hint", role: "status" });
+  const other = list.length > 1 ? h("button", { type: "button", class: "textbtn small" }) : null;
+  const show = () => {
+    const snd = list[idx];
+    note.textContent = "";
+    audio.src = snd.url;
+    cap.textContent = credit(snd) ? t("soundBy") + credit(snd) : "";
+    if (other) other.textContent = t("otherSound", idx + 2 > list.length ? 1 : idx + 2, list.length);
+  };
+  audio.addEventListener("error", () => {
+    // kaputte Aufnahme: nächste versuchen, sonst Hinweis
+    if (list.length > 1 && !audio.dataset.tried) { audio.dataset.tried = "1"; idx = (idx + 1) % list.length; item.soundIdx = idx; show(); }
+    else note.textContent = t("audioBroken");
+  });
+  if (other) other.addEventListener("click", () => { audio.pause(); delete audio.dataset.tried; idx = (idx + 1) % list.length; item.soundIdx = idx; show(); });
+  show();
+  return h("section", { class: "soundbox" },
+    h("p", { class: "listen", text: t("listen") }), audio, note,
+    h("div", { class: "figcap" }, cap, other));
 }
 
 function update(item, ui) {
@@ -360,7 +436,7 @@ function update(item, ui) {
   ui.score.textContent = t("points", r.score);
   const done = item.step >= item.questions.length;
 
-  ui.trail.replaceChildren(...item.questions.map((q, i) => {
+  put(ui.trail, ...item.questions.map((q, i) => {
     let cls = "later", value = "", it = false;
     if (q.skip === "missing") { if (i < item.step || done) { cls = "free"; value = t("noData"); } }
     else if (q.skip === "only") { if (i < item.step || done) { cls = "free"; value = q.correct.name; it = ITALIC.has(q.rank); } }
@@ -379,7 +455,8 @@ function update(item, ui) {
     const last = r.idx >= r.items.length - 1;
     const wikiLink = h("button", { type: "button", class: "textbtn", onclick: () => openExternal(QuizData.wikiSearchUrl(item.taxon.name)) }, t("wikiSearch"));
     const article = settings.wiki ? h("section", { class: "article", "aria-label": t("wikiAria"), "aria-live": "polite" }) : null;
-    ui.panel.replaceChildren(h("div", { class: "reveal" },
+    put(ui.panel, h("div", { class: "reveal" },
+      session.sounds && item.photo ? h("div", { class: "reveal-photo" }, photoBox(item, { first: true, alt: item.taxon.name })) : null,
       h("h2", { text: item.taxon.name }),
       item.taxon.common ? h("p", { class: "common-big", text: item.taxon.common }) : null,
       item.questions.some(q => q.skip) ? h("p", { class: "hint", text: t("skippedHint") }) : null,
@@ -399,7 +476,7 @@ function update(item, ui) {
   const q = item.questions[item.step];
   const answered = q.answer != null;
   const right = answered && q.answer === q.correct.id;
-  ui.panel.replaceChildren(
+  put(ui.panel, 
     h("h2", { class: "ask", text: rankAsk(q.rank, item.plantLike) }),
     h("div", { class: "options" + (answered ? " answered" : ""), role: "group", "aria-label": rankAsk(q.rank, item.plantLike) },
       q.options.map(o => {
@@ -456,12 +533,12 @@ function confirmQuit() {
   if (window.confirm(t("confirmQuit"))) showSetup();
 }
 async function fillArticle(item, el, wikiLink) {
-  el.replaceChildren(h("p", { class: "hint", text: t("wikiLoading") }));
+  put(el, h("p", { class: "hint", text: t("wikiLoading") }));
   let w;
   try { w = await QuizData.wikipedia(item.taxon); }
-  catch { if (el.isConnected) el.replaceChildren(h("p", { class: "hint", text: t("wikiOffline") })); return; }
+  catch { if (el.isConnected) put(el, h("p", { class: "hint", text: t("wikiOffline") })); return; }
   if (!el.isConnected) return;
-  if (!w) { el.replaceChildren(h("p", { class: "hint", text: t("wikiNone") })); return; }
+  if (!w) { put(el, h("p", { class: "hint", text: t("wikiNone") })); return; }
   wikiLink.replaceWith(h("button", { type: "button", class: "textbtn", onclick: () => openExternal(w.url) }, t("wikiOpen")));
   let fig = null;
   if (w.image && w.image.url) {
@@ -470,7 +547,7 @@ async function fillArticle(item, el, wikiLink) {
     fig = h("figure", {}, img, credit ? h("figcaption", { text: t("imageBy") + credit }) : null);
     img.addEventListener("error", () => fig.remove(), { once: true });
   }
-  el.replaceChildren(...[
+  put(el, ...[
     h("h3", { class: "article-title", text: w.title }),
     w.lang !== settings.lang ? h("p", { class: "hint", text: t("wikiOtherLang") }) : null,
     fig,
@@ -497,7 +574,7 @@ function showEnd() {
   store.set("stats", stats);
   const pct = r.possible ? Math.round(100 * r.score / r.possible) : 0;
   const perfect = r.items.filter(it => it.allRight).length;
-  $app.replaceChildren(h("main", { class: "end" },
+  put($app, h("main", { class: "end" },
     h("h1", { text: pct >= 90 ? t("endGreat") : pct >= 60 ? t("endOk") : t("endPractice") }),
     h("p", { class: "lead", text: t("endLead", r.score, r.possible, pct, perfect, r.items.length) + (r.repeated ? t("repeated") : "") }),
     h("ol", { class: "results" }, r.items.map(it => h("li", {},

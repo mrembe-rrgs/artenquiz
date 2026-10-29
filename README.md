@@ -4,6 +4,14 @@ Oberfläche auf Deutsch und Englisch (Umschalter oben rechts; beim ersten Start 
 
 Android-App zum Üben der Artenkenntnis. Zu jedem Foto bestimmt man Stufe für Stufe, wohin die Art in der Systematik gehört, z. B. Familie → Gattung → Art innerhalb der Ordnung Poales. Taxonomie, Fotos, Verbreitung und Wikipedia-Links kommen live von [iNaturalist](https://www.inaturalist.org).
 
+## Funktionen
+
+- Bestimmen Stufe für Stufe von einer frei wählbaren oberen bis zur unteren Rangstufe, eingegrenzt auf Gruppe, Ort, „nur heimisch“ und optional den aktuellen Monat
+- Bestimmen nach Foto (Standardfoto oder echte Beobachtungsfotos, mit „anderes Foto“) oder nach Geräusch (Tonaufnahmen von iNaturalist)
+- Schwierigkeit: leicht (Falschantworten aus Geschwistergruppen der Region) oder schwer (bevorzugt häufige Verwechslungen laut iNaturalist)
+- Lernstapel mit Wiederholen-Modus, falsch bestimmte Arten kommen öfter wieder
+- Wikipedia-Artikel nach jeder Art, Deutsch und Englisch
+
 ## Aufbau
 
 - `www/` – die eigentliche App (HTML, CSS, JavaScript). Lässt sich zum Testen direkt im Browser öffnen: `www/index.html`.

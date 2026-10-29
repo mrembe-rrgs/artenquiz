@@ -110,13 +110,19 @@ const QuizData = (() => {
   }
 
   // ---------- Artenpool ----------
-  /* onlyIds: nur diese Arten (Lernstapel) – Gruppe, Ort und „heimisch“ gelten trotzdem */
-  function newSession({ group, place, native, onlyIds }) {
+  /* Optionen einer Auswahl:
+     onlyIds  – nur diese Arten (Lernstapel); Gruppe, Ort und „heimisch“ gelten trotzdem
+     month    – nur Arten, die in diesem Monat (1–12) beobachtet wurden
+     sounds   – nach Geräusch bestimmen: nur Arten mit Tonaufnahmen
+     field    – echte Beobachtungsfotos statt Standardfoto
+     hard     – Falschantworten bevorzugt aus häufigen Verwechslungen */
+  function newSession({ group, place, native, onlyIds, month, sounds, field, hard }) {
     return {
       group: group || LIFE, place: place || null, native: !!(place && native),
       onlyIds: onlyIds && onlyIds.length ? onlyIds.slice() : null, ctx: [],
+      month: month || null, sounds: !!sounds, field: !!field, hard: !!hard,
       pool: [], page: 0, poolDone: false, seen: new Set(),
-      regional: new Set(), poolHasAnc: false, sib: new Map(), anc: new Map()
+      regional: new Set(), poolHasAnc: false, sib: new Map(), anc: new Map(), similar: new Map()
     };
   }
   const STACK_CHUNK = 150;
@@ -124,14 +130,20 @@ const QuizData = (() => {
     s.regional.add(t.id);
     if (Array.isArray(t.ancestor_ids)) { s.poolHasAnc = true; t.ancestor_ids.forEach(id => s.regional.add(id)); }
   }
+  function poolFilter(s) {
+    return {
+      place_id: s.place && s.place.id, native: s.native ? "true" : undefined, quality_grade: "research",
+      month: s.month || undefined, sounds: s.sounds ? "true" : undefined
+    };
+  }
   async function loadPoolPage(s) {
     const page = s.page + 1;
-    const filter = { place_id: s.place && s.place.id, native: s.native ? "true" : undefined, quality_grade: "research" };
+    const filter = poolFilter(s);
     let res;
     if (s.onlyIds) {
       // Wiederholen: einmal die häufigsten Arten der Auswahl laden – sie liefern regionale Falschantworten
       if (page === 1 && !s.ctxLoaded) {
-        const c = await api("/observations/species_counts", { taxon_id: s.group.id, ...filter, per_page: 200 });
+        const c = await api("/observations/species_counts", { taxon_id: s.group.id, ...filter, sounds: undefined, per_page: 200 });
         s.ctx = (c.results || []).map(r => r.taxon).filter(t => t && t.rank === "species");
         s.ctx.forEach(t => noteRegional(s, t));
         s.ctxLoaded = true;
@@ -198,6 +210,8 @@ const QuizData = (() => {
     picked.forEach(p => s.seen.add(p.taxon.id));
     return { items: picked.map(p => buildItem(s, p, details.get(p.taxon.id) || p.taxon, levels)), repeated };
   }
+  const photoOf = ph => ph && (ph.medium_url || ph.url)
+    ? { url: ph.medium_url || ph.url, attribution: ph.attribution || "", license: ph.license_code || "" } : null;
   function buildItem(s, p, t, levels) {
     const chain = {};
     for (const id of t.ancestor_ids || []) {
@@ -205,15 +219,91 @@ const QuizData = (() => {
       if (a && levels.includes(a.rank)) chain[a.rank] = a;
     }
     chain.species = slim(t);
-    const ph = t.default_photo || p.taxon.default_photo;
+    const main = photoOf(t.default_photo || p.taxon.default_photo);
+    // weitere Fotos der Art (für „anderes Foto“)
+    const photos = main ? [main] : [];
+    for (const tp of t.taxon_photos || []) {
+      const ph = photoOf(tp.photo || tp);
+      if (ph && !photos.some(x => x.url === ph.url)) photos.push(ph);
+    }
     return {
       taxon: slim(t), count: p.count, chain, levels,
       ancestors: (t.ancestor_ids || p.taxon.ancestor_ids || []).slice(),
       plantLike: (t.ancestor_ids || p.taxon.ancestor_ids || []).some(id => PLANT_LIKE.includes(id)),
-      photo: ph ? { url: ph.medium_url || ph.url, attribution: ph.attribution || "", license: ph.license_code || "" } : null,
+      photo: main, photos: photos.slice(0, 8), photoIdx: 0, sounds: null, soundIdx: 0,
       inat: "https://www.inaturalist.org/taxa/" + t.id,
       questions: null, step: 0, prep: null
     };
+  }
+
+  // ---------- Fotos und Tonaufnahmen aus Beobachtungen ----------
+  async function observationMedia(s, taxonId, kind) {
+    const base = { taxon_id: taxonId, quality_grade: "research", per_page: 30, [kind]: "true" };
+    const collect = d => {
+      const out = [];
+      for (const o of d.results || []) {
+        const list = kind === "sounds" ? (o.sounds || []) : (o.photos || []).slice(0, 2);
+        for (const m of list) {
+          if (!m || !m.license_code) continue; // nur frei lizenzierte Medien
+          if (kind === "sounds") {
+            if (!m.file_url || m.subtype) continue; // SoundCloud-Einbettungen lassen sich nicht abspielen
+            out.push({ url: m.file_url, attribution: m.attribution || "", license: m.license_code, type: m.file_content_type || "" });
+          } else if (m.url) {
+            out.push({ url: m.url, attribution: m.attribution || "", license: m.license_code });
+          }
+        }
+      }
+      return out;
+    };
+    let media = collect(await api("/observations", { ...base, place_id: s.place && s.place.id, month: s.month || undefined }));
+    // zu wenig in Region/Monat: weltweit und ganzjährig nachschauen
+    if (media.length < 2 && (s.place || s.month)) {
+      const more = collect(await api("/observations", base));
+      media = media.concat(more.filter(m => !media.some(x => x.url === m.url)));
+    }
+    const seen = new Set();
+    return shuffle(media.filter(m => !seen.has(m.url) && seen.add(m.url))).slice(0, kind === "sounds" ? 8 : 12);
+  }
+
+  // ---------- Verwechslungsarten (schwer) ----------
+  async function similarTo(s, taxonId) {
+    if (s.similar.has(taxonId)) return s.similar.get(taxonId);
+    const get = async place => (await api("/identifications/similar_species", { taxon_id: taxonId, place_id: place })).results || [];
+    let res = await get(s.place && s.place.id);
+    if (res.length < 3 && s.place) res = res.concat((await get(undefined)).filter(r => !res.some(x => x.taxon && r.taxon && x.taxon.id === r.taxon.id)));
+    let sims = res.filter(r => r.taxon && r.taxon.id !== taxonId).map(r => ({ count: r.count || 1, taxon: r.taxon }));
+    // Vorfahren nachladen, falls die Antwort sie nicht enthält
+    const bare = sims.filter(r => !Array.isArray(r.taxon.ancestor_ids)).map(r => r.taxon.id);
+    if (bare.length) {
+      const got = await fetchTaxa(bare);
+      sims = sims.map(r => got.has(r.taxon.id) ? { ...r, taxon: got.get(r.taxon.id) } : r);
+    }
+    // nur Verwechslungen innerhalb der gewählten Gruppe sind als Antwort brauchbar
+    sims = sims.filter(r => s.group.id === LIFE.id || (r.taxon.ancestor_ids || []).includes(s.group.id));
+    const need = new Set();
+    for (const r of sims) {
+      const anc = r.taxon.ancestor_ids || [];
+      const gi = anc.indexOf(s.group.id);
+      for (const id of gi >= 0 ? anc.slice(gi + 1) : anc) if (id !== r.taxon.id && !s.anc.has(id)) need.add(id);
+    }
+    if (need.size) (await fetchTaxa([...need])).forEach((t, id) => s.anc.set(id, slim(t)));
+    sims.sort((a, b) => b.count - a.count);
+    s.similar.set(taxonId, sims);
+    return sims;
+  }
+  // Taxa der Stufe L unterhalb von parent, zu denen häufige Verwechslungen gehören
+  function confusersAt(s, sims, L, parent, correct) {
+    const out = [];
+    for (const r of sims) {
+      const t = r.taxon, anc = t.ancestor_ids || [];
+      if (parent.id !== LIFE.id && !anc.includes(parent.id)) continue;
+      let hit = null;
+      if (t.rank === L) hit = slim(t);
+      else for (const id of anc) { const a = s.anc.get(id); if (a && a.rank === L) { hit = a; break; } }
+      if (!hit || hit.id === correct.id || out.some(o => o.id === hit.id)) continue;
+      out.push({ ...hit, confuser: true, regional: s.regional.has(hit.id) });
+    }
+    return out;
   }
 
   // ---------- Fragen mit Falschantworten ----------
@@ -228,6 +318,15 @@ const QuizData = (() => {
   function prepare(s, item) {
     if (!item.prep) {
       item.prep = (async () => {
+        // Medien zuerst: ohne Tonaufnahme ist die Art im Geräusch-Modus nicht spielbar
+        if (s.sounds) {
+          item.sounds = await observationMedia(s, item.taxon.id, "sounds");
+          if (!item.sounds.length) { item.unavailable = true; item.questions = []; return item; }
+        } else if (s.field) {
+          const field = await observationMedia(s, item.taxon.id, "photos");
+          if (field.length) { item.photos = field; item.fieldPhotos = true; }
+        }
+        const sims = s.hard ? await similarTo(s, item.taxon.id) : [];
         const qs = [];
         let parent = s.group;
         for (const L of item.levels) {
@@ -246,11 +345,17 @@ const QuizData = (() => {
             const sib = await siblings(s, parent.id, L);
             others = others.concat(sib.filter(x => x.id !== correct.id && !have.has(x.id)).map(x => ({ ...x, regional: s.regional.has(x.id) })));
           }
-          if (!others.length) {
+          const conf = s.hard ? confusersAt(s, sims, L, parent, correct) : [];
+          if (!others.length && !conf.length) {
             qs.push({ rank: L, skip: "only", correct });
           } else {
-            const chosen = shuffle(others.filter(o => o.regional)).concat(shuffle(others.filter(o => !o.regional))).slice(0, 3);
-            qs.push({ rank: L, correct, options: shuffle([{ ...correct, isCorrect: true }, ...chosen]), answer: null });
+            // schwer: Verwechslungen zuerst, dann regionale, dann übrige
+            const rest = others.filter(o => !conf.some(c => c.id === o.id));
+            const chosen = conf.slice(0, 3)
+              .concat(shuffle(rest.filter(o => o.regional)), shuffle(rest.filter(o => !o.regional)))
+              .slice(0, 3);
+            qs.push({ rank: L, correct, options: shuffle([{ ...correct, isCorrect: true }, ...chosen]), answer: null,
+              confusers: chosen.filter(o => o.confuser).length });
           }
           parent = correct;
         }

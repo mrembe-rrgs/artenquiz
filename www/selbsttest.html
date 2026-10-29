@@ -28,7 +28,7 @@
 <main class="st" id="st">
   <a class="back" href="index.html" data-i18n="back">Zurück zur App</a>
   <h1 data-i18n="title">Datenquelle prüfen</h1>
-  <p class="lead" data-i18n="lead">Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Prüft auch, ob Wikipedia-Artikel gefunden werden. Dauert etwa 5 bis 7 Minuten.</p>
+  <p class="lead" data-i18n="lead">Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Prüft auch, ob Wikipedia-Artikel gefunden werden. Prüft außerdem Tonaufnahmen, Verwechslungsarten und Beobachtungsfotos. Dauert etwa 8 bis 10 Minuten.</p>
   <button class="btn" id="run" type="button" data-i18n="run">Test starten</button>
   <button class="btn secondary" id="save" type="button" disabled data-i18n="save">Ergebnis speichern</button>
   <p class="hint" id="status" aria-live="polite" style="margin-top:12px"></p>
@@ -46,14 +46,14 @@ if (LANG !== "en") LANG = "de";
 I18N.setLang(LANG); QuizData.setLang(LANG);
 const ST = {
   de: { back: "Zurück zur App", title: "Datenquelle prüfen", run: "Test starten", save: "Ergebnis speichern",
-    lead: "Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Prüft auch, ob Wikipedia-Artikel gefunden werden. Dauert etwa 5 bis 7 Minuten.",
+    lead: "Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Prüft auch, ob Wikipedia-Artikel gefunden werden. Prüft außerdem Tonaufnahmen, Verwechslungsarten und Beobachtungsfotos. Dauert etwa 8 bis 10 Minuten.",
     waiting: "wartet", running: "läuft …", ok: "in Ordnung", warn: "mit Hinweisen", bad: "Problem", error: "Fehler",
     checking: (i, n, name) => `Prüfe ${i} von ${n}: ${name} …`,
     done: (s, r) => `Fertig nach ${s} s und ${r} Anfragen. Speichere das Ergebnis und schick es mir, wenn etwas auffällt.`,
     facts: (pool, items, req, sec, reg) => `Pool ${pool} Arten mit Foto · ${items} geprüft · ${req} Anfragen · ${sec} s · Falschantworten aus der Region: ${reg} %`,
     wiki: (f, c, m) => ` · Wikipedia: ${f} von ${c} gefunden, ${m} in der eingestellten Sprache`, sample: "Beispiel: ", more: n => `… und ${n} weitere` },
   en: { back: "Back to the app", title: "Check data source", run: "Start test", save: "Save result",
-    lead: "Plays through several groups of plants, animals and fungi with live iNaturalist data, no input needed. It reports missing ranks, too few wrong answers, or missing photos, and checks whether Wikipedia articles are found. Takes about 5 to 7 minutes.",
+    lead: "Plays through several groups of plants, animals and fungi with live iNaturalist data, no input needed. It reports missing ranks, too few wrong answers, or missing photos, and checks whether Wikipedia articles are found. Also checks sound recordings, confusion species and observation photos. Takes about 8 to 10 minutes.",
     waiting: "waiting", running: "running …", ok: "fine", warn: "with notes", bad: "problem", error: "error",
     checking: (i, n, name) => `Checking ${i} of ${n}: ${name} …`,
     done: (s, r) => `Done after ${s} s and ${r} requests. Save the result and send it if anything looks off.`,
@@ -71,7 +71,11 @@ const CASES = [
   { title: ["Champignonartige (Agaricales)", "Gilled mushrooms (Agaricales)"], desc: ["Pilze · Familie bis Art · Deutschland", "Fungi · family to species · Germany"], group: ["Agaricales", "order"], oben: "family", unten: "species", place: "Germany", native: false },
   { title: ["Pilze (Fungi)", "Fungi"], desc: ["Pilze · Abteilung bis Art · Deutschland", "Fungi · phylum to species · Germany"], group: ["Fungi", "kingdom"], oben: "phylum", unten: "species", place: "Germany", native: false },
   { title: ["Alle Lebewesen", "All living things"], desc: ["Reich bis Klasse · weltweit", "Kingdom to class · worldwide"], group: null, oben: "kingdom", unten: "class", place: null, native: false },
-  { title: ["Rohrkolben (Typha)", "Cattails (Typha)"], desc: ["Kleine Gruppe · nur Art · Deutschland", "Small group · species only · Germany"], group: ["Typha", "genus"], oben: "species", unten: "species", place: "Germany", native: false }
+  { title: ["Rohrkolben (Typha)", "Cattails (Typha)"], desc: ["Kleine Gruppe · nur Art · Deutschland", "Small group · species only · Germany"], group: ["Typha", "genus"], oben: "species", unten: "species", place: "Germany", native: false },
+  { title: ["Vogelstimmen (Aves)", "Bird sounds (Aves)"], desc: ["Geräusch · Familie bis Art · Deutschland", "Sound · family to species · Germany"], group: ["Aves", "class"], oben: "family", unten: "species", place: "Germany", native: false, opts: { sounds: true } },
+  { title: ["Heuschrecken nach Geräusch (Orthoptera)", "Grasshoppers by sound (Orthoptera)"], desc: ["Geräusch · Familie bis Art · Europa", "Sound · family to species · Europe"], group: ["Orthoptera", "order"], oben: "family", unten: "species", place: "Europe", native: false, opts: { sounds: true } },
+  { title: ["Schwer: Champignonartige", "Hard: gilled mushrooms"], desc: ["Verwechslungsarten · Familie bis Art · Deutschland", "Confusion species · family to species · Germany"], group: ["Agaricales", "order"], oben: "family", unten: "species", place: "Germany", native: false, opts: { hard: true } },
+  { title: ["Feldfotos + Monat: Korbblütler", "Field photos + month: daisy family"], desc: ["Beobachtungsfotos, aktueller Monat · Gattung bis Art · Deutschland", "Observation photos, this month · genus to species · Germany"], group: ["Asteraceae", "family"], oben: "genus", unten: "species", place: "Germany", native: false, opts: { field: true, season: true } }
 ].map(c => ({ ...c, title: c.title[LANG === "en" ? 1 : 0], desc: c.desc[LANG === "en" ? 1 : 0] }));
 const $ = id => document.getElementById(id);
 const RANKS = QuizData.RANKS;
@@ -93,7 +97,8 @@ function fill(i, res) {
   const facts = document.createElement("div");
   facts.className = "sample";
   facts.textContent = ST.facts(res.poolSize, res.items, res.requests, res.seconds, res.regionalShare) +
-    (res.wiki ? ST.wiki(res.wiki.found, res.wiki.checked, res.wiki.german) : "");
+    (res.wiki ? ST.wiki(res.wiki.found, res.wiki.checked, res.wiki.german) : "") +
+    (res.extra ? " · " + Object.entries(res.extra).map(([k, v]) => `${k}: ${v}`).join(", ") : "");
   body.append(facts);
   if (res.sample) { const s = document.createElement("div"); s.className = "sample"; s.textContent = ST.sample + res.sample; body.append(s); }
   if (res.issues.length) {
@@ -109,7 +114,8 @@ async function runCase(c) {
   const issues = [];
   const group = c.group ? await QuizData.findTaxon(c.group[0], c.group[1]) : QuizData.LIFE;
   const place = c.place ? await QuizData.findPlace(c.place) : null;
-  const s = QuizData.newSession({ group, place, native: c.native });
+  const o = c.opts || {};
+  const s = QuizData.newSession({ group, place, native: c.native, sounds: o.sounds, field: o.field, hard: o.hard, month: o.season ? new Date().getMonth() + 1 : null });
   const levels = RANKS.slice(RANKS.indexOf(c.oben), RANKS.indexOf(c.unten) + 1);
   const round = await QuizData.newRound(s, { levels, size: PER_CASE });
   if (round.empty) return { poolSize: 0, items: 0, requests: QuizData.requestCount() - r0, seconds: Math.round((Date.now() - t0) / 1000), regionalShare: 0, issues: ["Keine Arten mit Foto gefunden."], level: "bad" };
@@ -117,8 +123,21 @@ async function runCase(c) {
   if (!s.poolHasAnc) issues.push("Pool liefert keine Vorfahren-IDs: Falschantworten können nicht nach Region gewählt werden.");
   let distractors = 0, regional = 0, sample = "";
   const perLevel = Object.fromEntries(levels.map(l => [l, { asked: 0, missing: 0, only: 0, short: 0 }]));
+  let soundItems = 0, soundNone = 0, fieldItems = 0, confQ = 0, askedQ = 0;
   for (const it of round.items) {
     await QuizData.prepare(s, it);
+    if (o.sounds) {
+      if (it.unavailable) { soundNone++; issues.push(`${it.taxon.name}: keine abspielbare Tonaufnahme.`); continue; }
+      soundItems++;
+      // erste Aufnahmen probehalber laden
+      if (soundItems <= 2) {
+        const ok = await new Promise(res => { const a = new Audio(); const tm = setTimeout(() => res(false), 12000);
+          a.preload = "auto"; a.oncanplay = () => { clearTimeout(tm); res(true); }; a.onerror = () => { clearTimeout(tm); res(false); }; a.src = it.sounds[0].url; });
+        if (!ok) issues.push(`${it.taxon.name}: Aufnahme lässt sich nicht abspielen (${it.sounds[0].type || it.sounds[0].url.split(".").pop()}).`);
+      }
+    }
+    if (o.field) { if (it.fieldPhotos) fieldItems++; else issues.push(`${it.taxon.name}: keine Beobachtungsfotos, Standardfoto verwendet.`); }
+    for (const q of it.questions) if (q.options) { askedQ++; if (q.confusers) confQ++; }
     if (!it.photo || !it.photo.url) issues.push(`${it.taxon.name}: kein Foto.`);
     for (const q of it.questions) {
       const pl = perLevel[q.rank];
@@ -156,6 +175,7 @@ async function runCase(c) {
     requests: QuizData.requestCount() - r0, seconds: Math.round((Date.now() - t0) / 1000),
     regionalShare: distractors ? Math.round(100 * regional / distractors) : 0, sample, issues, level,
     wiki: { checked: wikiChecked, found: wikiFound, german: wikiDe, error: wikiError },
+    extra: o.sounds ? { sounds: soundItems, noSound: soundNone } : o.field ? { fieldPhotos: fieldItems } : o.hard ? { questions: askedQ, withConfusers: confQ } : null,
     chains: round.items.map(it => ({ species: it.taxon.name, common: it.taxon.common, chain: Object.fromEntries(levels.map(l => [l, it.chain[l] ? it.chain[l].name : null])),
       options: (it.questions || []).map(q => q.options ? { rank: q.rank, names: q.options.map(o => o.name) } : { rank: q.rank, skip: q.skip }) }))
   };
