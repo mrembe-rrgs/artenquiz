@@ -10,34 +10,49 @@ permissions:
 
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04 bringt das Android-SDK schon mit
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
 
-      - uses: android-actions/setup-android@v3
+      - name: Android-SDK prüfen
+        run: |
+          set -o pipefail
+          {
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            ls "$ANDROID_HOME/platforms" || true
+            yes | "$SDKM" --licenses > /dev/null || true
+            "$SDKM" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          } 2>&1 | tee -a build.log
 
       - name: Abhängigkeiten installieren
-        run: npm install
+        run: |
+          set -o pipefail
+          npm install 2>&1 | tee -a build.log
 
       - name: Android-Projekt erzeugen
         run: |
-          [ -d android ] || npx cap add android
-          npx cap sync android
+          set -o pipefail
+          {
+            [ -d android ] || npx cap add android
+            npx cap sync android
+          } 2>&1 | tee -a build.log
           # Versionsnummer hochzählen, damit Updates sauber installiert werden
           sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"0.1.${{ github.run_number }}\"/" android/app/build.gradle
 
       - name: App-Icon und Startbild erzeugen
         continue-on-error: true
-        run: npx @capacitor/assets generate --android
+        run: npx @capacitor/assets generate --android 2>&1 | tee -a build.log
 
       - name: Festen Signaturschlüssel bereitstellen
         run: |
@@ -46,7 +61,9 @@ jobs:
 
       - name: APK bauen
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee -a ../build.log
 
       - name: APK als Release „neueste“ bereitstellen
         env:
@@ -58,3 +75,14 @@ jobs:
             --title "Artenquiz – Build ${{ github.run_number }}" \
             --notes "Automatisch gebaut aus ${{ github.sha }}. Auf dem Handy artenquiz.apk herunterladen und installieren." \
             --prerelease
+
+      # Bei Fehlern das Ende des Protokolls als Hinweis anzeigen (sichtbar in der Übersicht des Laufs)
+      - name: Fehlerprotokoll
+        if: failure()
+        run: |
+          [ -f build.log ] || echo "kein Protokoll" > build.log
+          grep -iE "error|failed|exception|what went wrong" build.log | tail -n 40 > err.txt || true
+          tail -n 60 build.log > tail.txt
+          msg=$(cat err.txt; echo "-----"; cat tail.txt)
+          msg="${msg//'%'/'%25'}"; msg="${msg//$'\n'/'%0A'}"; msg="${msg//$'\r'/'%0D'}"
+          echo "::error title=Build-Protokoll::${msg}"
