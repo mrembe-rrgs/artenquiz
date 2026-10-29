@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Datenquelle prüfen</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .st { padding: 20px 16px 32px; }
+  .st h1 { font-family: var(--serif); font-weight: 600; font-size: 1.7rem; margin: 8px 0 6px; }
+  .st .lead { color: var(--muted); margin: 0 0 18px; }
+  .case { background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
+  .case .head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .case .name { font-weight: 600; }
+  .case .state { font-size: .85rem; color: var(--muted); flex: 0 0 auto; }
+  .case .state.ok { color: var(--right); }
+  .case .state.warn { color: #a86400; }
+  .case .state.bad { color: var(--wrong); }
+  .case .desc { font-size: .85rem; color: var(--muted); }
+  .case ul { margin: 8px 0 0; padding-left: 18px; font-size: .85rem; }
+  .case .sample { font-size: .85rem; margin-top: 6px; }
+  .back { display: inline-block; margin-bottom: 4px; }
+  @media (prefers-color-scheme: dark) { .case .state.warn { color: #e3a346; } }
+</style>
+</head>
+<body>
+<main class="st" id="st">
+  <a class="back" href="index.html">Zurück zur App</a>
+  <h1>Datenquelle prüfen</h1>
+  <p class="lead">Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Dauert etwa 4 bis 6 Minuten.</p>
+  <button class="btn" id="run" type="button">Test starten</button>
+  <button class="btn secondary" id="save" type="button" disabled>Ergebnis speichern</button>
+  <p class="hint" id="status" aria-live="polite" style="margin-top:12px"></p>
+  <div id="cases"></div>
+</main>
+<script src="data.js"></script>
+<script>
+"use strict";
+const PER_CASE = 8;
+const CASES = [
+  { title: "Süßgrasartige (Poales)", desc: "Pflanzen · Familie bis Art · Deutschland, heimisch", group: ["Poales", "order"], oben: "family", unten: "species", place: "Germany", native: true },
+  { title: "Korbblütler (Asteraceae)", desc: "Pflanzen, sehr viele Gattungen · Gattung bis Art · Deutschland", group: ["Asteraceae", "family"], oben: "genus", unten: "species", place: "Germany", native: false },
+  { title: "Käfer (Coleoptera)", desc: "Tiere · Familie bis Art · Deutschland, heimisch", group: ["Coleoptera", "order"], oben: "family", unten: "species", place: "Germany", native: true },
+  { title: "Vögel (Aves)", desc: "Tiere · Ordnung bis Art · Europa", group: ["Aves", "class"], oben: "order", unten: "species", place: "Europe", native: false },
+  { title: "Schmetterlinge (Lepidoptera)", desc: "Tiere · Familie bis Gattung · Deutschland", group: ["Lepidoptera", "order"], oben: "family", unten: "genus", place: "Germany", native: false },
+  { title: "Champignonartige (Agaricales)", desc: "Pilze · Familie bis Art · Deutschland", group: ["Agaricales", "order"], oben: "family", unten: "species", place: "Germany", native: false },
+  { title: "Pilze (Fungi)", desc: "Pilze · Abteilung bis Art · Deutschland", group: ["Fungi", "kingdom"], oben: "phylum", unten: "species", place: "Germany", native: false },
+  { title: "Alle Lebewesen", desc: "Reich bis Klasse · weltweit", group: null, oben: "kingdom", unten: "class", place: null, native: false },
+  { title: "Rohrkolben (Typha)", desc: "Kleine Gruppe · nur Art · Deutschland", group: ["Typha", "genus"], oben: "species", unten: "species", place: "Germany", native: false }
+];
+const $ = id => document.getElementById(id);
+const RANKS = QuizData.RANKS;
+let report = null;
+
+function caseEl(c, i) {
+  const el = document.createElement("div");
+  el.className = "case"; el.id = "case" + i;
+  el.innerHTML = '<div class="head"><span class="name"></span><span class="state">wartet</span></div><div class="desc"></div><div class="body"></div>';
+  el.querySelector(".name").textContent = c.title;
+  el.querySelector(".desc").textContent = c.desc;
+  return el;
+}
+function setState(i, cls, text) { const s = $("case" + i).querySelector(".state"); s.className = "state " + cls; s.textContent = text; }
+function fill(i, res) {
+  const body = $("case" + i).querySelector(".body");
+  body.replaceChildren();
+  const facts = document.createElement("div");
+  facts.className = "sample";
+  facts.textContent = `Pool ${res.poolSize} Arten mit Foto · ${res.items} geprüft · ${res.requests} Anfragen · ${res.seconds} s · Falschantworten aus der Region: ${res.regionalShare} %`;
+  body.append(facts);
+  if (res.sample) { const s = document.createElement("div"); s.className = "sample"; s.textContent = "Beispiel: " + res.sample; body.append(s); }
+  if (res.issues.length) {
+    const ul = document.createElement("ul");
+    for (const m of res.issues.slice(0, 8)) { const li = document.createElement("li"); li.textContent = m; ul.append(li); }
+    if (res.issues.length > 8) { const li = document.createElement("li"); li.textContent = `… und ${res.issues.length - 8} weitere`; ul.append(li); }
+    body.append(ul);
+  }
+}
+
+async function runCase(c) {
+  const t0 = Date.now(), r0 = QuizData.requestCount();
+  const issues = [];
+  const group = c.group ? await QuizData.findTaxon(c.group[0], c.group[1]) : QuizData.LIFE;
+  const place = c.place ? await QuizData.findPlace(c.place) : null;
+  const s = QuizData.newSession({ group, place, native: c.native });
+  const levels = RANKS.slice(RANKS.indexOf(c.oben), RANKS.indexOf(c.unten) + 1);
+  const round = await QuizData.newRound(s, { levels, size: PER_CASE });
+  if (round.empty) return { poolSize: 0, items: 0, requests: QuizData.requestCount() - r0, seconds: Math.round((Date.now() - t0) / 1000), regionalShare: 0, issues: ["Keine Arten mit Foto gefunden."], level: "bad" };
+  if (s.pool.length < PER_CASE) issues.push(`Nur ${s.pool.length} Arten mit Foto im Pool.`);
+  if (!s.poolHasAnc) issues.push("Pool liefert keine Vorfahren-IDs: Falschantworten können nicht nach Region gewählt werden.");
+  let distractors = 0, regional = 0, sample = "";
+  const perLevel = Object.fromEntries(levels.map(l => [l, { asked: 0, missing: 0, only: 0, short: 0 }]));
+  for (const it of round.items) {
+    await QuizData.prepare(s, it);
+    if (!it.photo || !it.photo.url) issues.push(`${it.taxon.name}: kein Foto.`);
+    for (const q of it.questions) {
+      const pl = perLevel[q.rank];
+      if (q.skip === "missing") { pl.missing++; issues.push(`${it.taxon.name}: keine ${q.rank} in den Daten.`); continue; }
+      if (q.skip === "only") { pl.only++; continue; }
+      pl.asked++;
+      const others = q.options.filter(o => !o.isCorrect);
+      distractors += others.length; regional += others.filter(o => o.regional).length;
+      if (others.length < 3) { pl.short++; issues.push(`${it.taxon.name}, ${q.rank}: nur ${others.length} Falschantwort(en).`); }
+      const names = q.options.map(o => o.name.toLowerCase());
+      if (new Set(names).size !== names.length) issues.push(`${it.taxon.name}, ${q.rank}: doppelter Name unter den Antworten.`);
+      if (q.correct.rank !== q.rank) issues.push(`${it.taxon.name}: Rang ${q.correct.rank} statt ${q.rank}.`);
+    }
+    if (!sample) sample = levels.map(l => it.chain[l] ? it.chain[l].name : "–").join(" › ");
+  }
+  for (const [l, v] of Object.entries(perLevel)) {
+    if (v.only) issues.push(`${v.only}× ${l} ohne Alternative (wird übersprungen).`);
+  }
+  const bad = round.items.some(it => it.questions.every(q => q.skip));
+  if (bad) issues.push("Mindestens eine Art ganz ohne Frage.");
+  const level = bad || s.pool.length === 0 ? "bad" : issues.length ? "warn" : "ok";
+  return {
+    group, place, levels, poolSize: s.pool.length, items: round.items.length, perLevel,
+    requests: QuizData.requestCount() - r0, seconds: Math.round((Date.now() - t0) / 1000),
+    regionalShare: distractors ? Math.round(100 * regional / distractors) : 0, sample, issues, level,
+    chains: round.items.map(it => ({ species: it.taxon.name, common: it.taxon.common, chain: Object.fromEntries(levels.map(l => [l, it.chain[l] ? it.chain[l].name : null])),
+      options: (it.questions || []).map(q => q.options ? { rank: q.rank, names: q.options.map(o => o.name) } : { rank: q.rank, skip: q.skip }) }))
+  };
+}
+
+$("cases").replaceChildren(...CASES.map(caseEl));
+$("run").addEventListener("click", async () => {
+  $("run").disabled = true; $("save").disabled = true;
+  report = { startedAt: new Date().toISOString(), userAgent: navigator.userAgent, cases: [] };
+  const t0 = Date.now();
+  for (let i = 0; i < CASES.length; i++) {
+    $("status").textContent = `Prüfe ${i + 1} von ${CASES.length}: ${CASES[i].title} …`;
+    setState(i, "", "läuft …");
+    try {
+      const res = await runCase(CASES[i]);
+      report.cases.push({ title: CASES[i].title, ...res });
+      setState(i, res.level, res.level === "ok" ? "in Ordnung" : res.level === "warn" ? "mit Hinweisen" : "Problem");
+      fill(i, res);
+    } catch (e) {
+      report.cases.push({ title: CASES[i].title, error: QuizData.friendly(e), raw: String(e && e.message) });
+      setState(i, "bad", "Fehler");
+      $("case" + i).querySelector(".body").textContent = QuizData.friendly(e);
+    }
+  }
+  report.seconds = Math.round((Date.now() - t0) / 1000);
+  report.requests = QuizData.requestCount();
+  $("status").textContent = `Fertig nach ${report.seconds} s und ${report.requests} Anfragen. Speichere das Ergebnis und schick es mir, wenn etwas auffällt.`;
+  $("run").disabled = false; $("save").disabled = false;
+});
+$("save").addEventListener("click", () => {
+  if (!report) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
+  a.download = "artenquiz_selbsttest.json";
+  document.body.append(a); a.click(); a.remove();
+});
+</script>
+</body>
+</html>

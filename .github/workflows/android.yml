@@ -35,6 +35,10 @@ jobs:
           # Versionsnummer hochzählen, damit Updates sauber installiert werden
           sed -i "s/versionCode [0-9]*/versionCode ${{ github.run_number }}/; s/versionName \"[^\"]*\"/versionName \"0.1.${{ github.run_number }}\"/" android/app/build.gradle
 
+      - name: App-Icon und Startbild erzeugen
+        continue-on-error: true
+        run: npx @capacitor/assets generate --android
+
       - name: Festen Signaturschlüssel bereitstellen
         run: |
           mkdir -p ~/.android
