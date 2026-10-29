@@ -163,9 +163,34 @@ input[type="search"] {
 .feedback.bad { color: var(--wrong); }
 .panel .btn { margin-top: 16px; }
 
-.reveal h2 { font-family: var(--serif); font-style: italic; font-weight: 600; font-size: 1.6rem; line-height: 1.2; margin: 4px 0 2px; }
+.reveal > h2 { font-family: var(--serif); font-style: italic; font-weight: 600; font-size: 1.6rem; line-height: 1.2; margin: 4px 0 2px; }
 .reveal .common-big { color: var(--muted); margin: 0 0 8px; }
-.reveal .links { display: flex; gap: 20px; flex-wrap: wrap; }
+.reveal .links { display: flex; column-gap: 20px; row-gap: 0; flex-wrap: wrap; }
+.reveal .nextbar {
+  position: sticky; bottom: 0; z-index: 2; margin-top: 12px;
+  padding: 18px 0 calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(to bottom, transparent, var(--paper) 16px);
+}
+.reveal .nextbar .btn { margin-top: 0; }
+
+/* ---------- Wikipedia-Artikel ---------- */
+.article { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.article-title { font-family: var(--serif); font-weight: 600; font-size: 1.35rem; line-height: 1.2; margin: 0 0 12px; }
+.article figure { margin: 0 -16px 16px; background: var(--sheet); }
+.article figure img { display: block; width: 100%; max-height: 62vh; object-fit: contain; cursor: zoom-in; }
+.article figcaption { font-size: .72rem; color: var(--muted); padding: 4px 16px 6px; background: var(--paper); }
+.article-body { line-height: 1.6; overflow-wrap: break-word; }
+.article-body p { margin: 0 0 .9em; }
+.article-body h2, .article-body h3, .article-body h4 { font-family: var(--serif); font-weight: 600; line-height: 1.25; margin: 1.5em 0 .45em; }
+.article-body h2 { font-size: 1.15rem; }
+.article-body h3 { font-size: 1.05rem; }
+.article-body h4 { font-size: 1rem; }
+.article-body ul, .article-body ol { margin: 0 0 .9em; padding-left: 1.3em; }
+.article-body li { margin-bottom: .25em; }
+.article-body dt { font-weight: 600; }
+.article-body dd { margin: 0 0 .5em 1em; }
+.article-source { font-size: .78rem; color: var(--muted); margin: 20px 0 0; }
+.textbtn.inline { padding: 0; font-weight: 600; font-size: inherit; }
 
 /* ---------- Laden / Fehler ---------- */
 .center { min-height: 70vh; display: flex; flex-direction: column; justify-content: center; padding: 24px 16px; }

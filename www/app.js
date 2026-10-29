@@ -64,7 +64,7 @@ function openExternal(url) {
 }
 
 // ---------- Zustand ----------
-const DEFAULTS = { oben: "family", unten: "species", group: null, place: null, native: true, showCommon: true };
+const DEFAULTS = { oben: "family", unten: "species", group: null, place: null, native: true, showCommon: true, wiki: true };
 let settings = Object.assign({}, DEFAULTS, store.get("settings", {}));
 if (!RANKS.includes(settings.oben) || !RANKS.includes(settings.unten)) Object.assign(settings, { oben: DEFAULTS.oben, unten: DEFAULTS.unten });
 if (settings.group && settings.group.rank !== groupRankFor(settings.oben)) settings.group = null;
@@ -194,7 +194,10 @@ function showSetup(message) {
   const extraField = h("section", { class: "field" },
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: settings.showCommon, onchange: e => { settings.showCommon = e.target.checked; saveSettings(); } }),
-      "Deutsche Namen bei den Antworten zeigen"));
+      "Deutsche Namen bei den Antworten zeigen"),
+    h("label", { class: "check" },
+      h("input", { type: "checkbox", checked: settings.wiki, onchange: e => { settings.wiki = e.target.checked; saveSettings(); } }),
+      "Nach jeder Art den Wikipedia-Artikel zeigen"));
 
   const ready = !gr || !!settings.group;
   const pct = stats.answered ? Math.round(100 * stats.correct / stats.answered) : null;
@@ -268,7 +271,8 @@ async function showItem() {
     if (r !== round || r.gen !== gen) return;
   }
   screen = "quiz";
-  const img = h("img", { alt: "Foto der gesuchten Art. Antippen zum Vergrößern.", src: photoUrl(item.photo, "large"), onclick: () => openZoom(item) });
+  if (settings.wiki) QuizData.wikipedia(item.taxon).catch(() => {}); // schon während der Fragen laden
+  const img = h("img", { alt: "Foto der gesuchten Art. Antippen zum Vergrößern.", src: photoUrl(item.photo, "large"), onclick: () => openZoom(photoUrl(item.photo, "large")) });
   img.addEventListener("error", () => { if (item.photo && img.src !== item.photo.url) img.src = item.photo.url; }, { once: true });
   const progress = h("div", { class: "progress", "aria-hidden": "true" },
     r.items.map((it, i) => h("span", { class: i < r.idx ? (it.allRight ? "ok" : "bad") : i === r.idx ? "now" : "" })));
@@ -310,14 +314,19 @@ function update(item, ui) {
 
   if (done) {
     const last = r.idx >= r.items.length - 1;
+    const wikiLink = h("button", { type: "button", class: "textbtn", onclick: () => openExternal(item.wikipedia) }, "In Wikipedia suchen");
+    const article = settings.wiki ? h("section", { class: "article", "aria-label": "Wikipedia-Artikel", "aria-live": "polite" }) : null;
     ui.panel.replaceChildren(h("div", { class: "reveal" },
       h("h2", { text: item.taxon.name }),
       item.taxon.common ? h("p", { class: "common-big", text: item.taxon.common }) : null,
       item.questions.some(q => q.skip) ? h("p", { class: "hint", text: "Grau markierte Stufen hatten keine Auswahl und zählen nicht." }) : null,
-      h("div", { class: "links" },
-        h("button", { type: "button", class: "textbtn", onclick: () => openExternal(item.wikipedia) }, "Wikipedia"),
+      h("div", { class: "links" }, wikiLink,
         h("button", { type: "button", class: "textbtn", onclick: () => openExternal(item.inat) }, "Mehr Fotos auf iNaturalist")),
-      h("button", { type: "button", class: "btn", onclick: () => { if (last) showEnd(); else { r.idx++; showItem(); } } }, last ? "Ergebnis ansehen" : "Nächste Art")));
+      article,
+      // bleibt beim Lesen des Artikels am unteren Rand
+      h("div", { class: "nextbar" },
+        h("button", { type: "button", class: "btn", onclick: () => { if (last) showEnd(); else { r.idx++; showItem(); } } }, last ? "Ergebnis ansehen" : "Nächste Art"))));
+    if (article) fillArticle(item, article, wikiLink);
     return;
   }
 
@@ -379,10 +388,36 @@ function finishItem(item) {
 function confirmQuit() {
   if (window.confirm("Runde beenden? Diese Runde wird nicht gewertet.")) showSetup();
 }
-function openZoom(item) {
+async function fillArticle(item, el, wikiLink) {
+  el.replaceChildren(h("p", { class: "hint", text: "Wikipedia-Artikel wird geladen …" }));
+  let w;
+  try { w = await QuizData.wikipedia(item.taxon); }
+  catch { if (el.isConnected) el.replaceChildren(h("p", { class: "hint", text: "Wikipedia ist gerade nicht erreichbar." })); return; }
+  if (!el.isConnected) return;
+  if (!w) { el.replaceChildren(h("p", { class: "hint", text: "Zu dieser Art gibt es keinen Wikipedia-Artikel." })); return; }
+  wikiLink.replaceWith(h("button", { type: "button", class: "textbtn", onclick: () => openExternal(w.url) }, "Artikel in Wikipedia öffnen"));
+  let fig = null;
+  if (w.image && w.image.url) {
+    const img = h("img", { src: w.image.url, alt: `Bild aus dem Wikipedia-Artikel ${w.title}`, loading: "lazy", onclick: () => openZoom(w.image.url) });
+    const credit = [w.image.artist, w.image.license].filter(Boolean).join(", ");
+    fig = h("figure", {}, img, credit ? h("figcaption", { text: "Bild: " + credit }) : null);
+    img.addEventListener("error", () => fig.remove(), { once: true });
+  }
+  el.replaceChildren(...[
+    h("h3", { class: "article-title", text: w.title }),
+    w.lang !== "de" ? h("p", { class: "hint", text: "Einen deutschen Artikel gibt es nicht, hier der englische." }) : null,
+    fig,
+    h("div", { class: "article-body", lang: w.lang }, w.body.cloneNode(true)),
+    h("p", { class: "article-source" }, "Text aus dem Wikipedia-Artikel ",
+      h("button", { type: "button", class: "textbtn inline", onclick: () => openExternal(w.url) }, `„${w.title}“`),
+      ", Lizenz CC BY-SA 4.0. Die Autoren stehen in der Versionsgeschichte des Artikels.")
+  ].filter(Boolean));
+}
+
+function openZoom(src) {
   closeZoom();
-  zoomEl = h("div", { class: "zoom", role: "dialog", "aria-label": "Foto in voller Größe, antippen zum Schließen", onclick: closeZoom },
-    h("img", { src: photoUrl(item.photo, "large"), alt: "" }));
+  zoomEl = h("div", { class: "zoom", role: "dialog", "aria-label": "Bild in voller Größe, antippen zum Schließen", onclick: closeZoom },
+    h("img", { src, alt: "" }));
   document.body.append(zoomEl);
 }
 function closeZoom() { if (zoomEl) { zoomEl.remove(); zoomEl = null; } }

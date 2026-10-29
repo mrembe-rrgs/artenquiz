@@ -28,7 +28,7 @@
 <main class="st" id="st">
   <a class="back" href="index.html">Zurück zur App</a>
   <h1>Datenquelle prüfen</h1>
-  <p class="lead">Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Dauert etwa 4 bis 6 Minuten.</p>
+  <p class="lead">Spielt einige Gruppen aus Pflanzen, Tieren und Pilzen mit echten iNaturalist-Daten durch, ohne Bedienung. Gemeldet wird, wo Stufen fehlen, Falschantworten knapp sind oder Fotos fehlen. Prüft auch, ob Wikipedia-Artikel gefunden werden. Dauert etwa 5 bis 7 Minuten.</p>
   <button class="btn" id="run" type="button">Test starten</button>
   <button class="btn secondary" id="save" type="button" disabled>Ergebnis speichern</button>
   <p class="hint" id="status" aria-live="polite" style="margin-top:12px"></p>
@@ -67,7 +67,8 @@ function fill(i, res) {
   body.replaceChildren();
   const facts = document.createElement("div");
   facts.className = "sample";
-  facts.textContent = `Pool ${res.poolSize} Arten mit Foto · ${res.items} geprüft · ${res.requests} Anfragen · ${res.seconds} s · Falschantworten aus der Region: ${res.regionalShare} %`;
+  facts.textContent = `Pool ${res.poolSize} Arten mit Foto · ${res.items} geprüft · ${res.requests} Anfragen · ${res.seconds} s · Falschantworten aus der Region: ${res.regionalShare} %` +
+    (res.wiki ? ` · Wikipedia: ${res.wiki.found} von ${res.wiki.checked} gefunden, ${res.wiki.german} auf Deutsch` : "");
   body.append(facts);
   if (res.sample) { const s = document.createElement("div"); s.className = "sample"; s.textContent = "Beispiel: " + res.sample; body.append(s); }
   if (res.issues.length) {
@@ -111,6 +112,17 @@ async function runCase(c) {
   for (const [l, v] of Object.entries(perLevel)) {
     if (v.only) issues.push(`${v.only}× ${l} ohne Alternative (wird übersprungen).`);
   }
+  // Wikipedia: für die ersten 4 Arten prüfen, ob ein Artikel gefunden wird
+  let wikiFound = 0, wikiDe = 0, wikiChecked = 0, wikiError = null;
+  for (const it of round.items.slice(0, 4)) {
+    wikiChecked++;
+    try {
+      const w = await QuizData.wikipedia(it.taxon);
+      if (w) { wikiFound++; if (w.lang === "de") wikiDe++; if (!w.image) issues.push(`${it.taxon.name}: Wikipedia-Artikel ohne Bild.`); }
+      else issues.push(`${it.taxon.name}: kein Wikipedia-Artikel gefunden.`);
+    } catch (e) { wikiError = String(e && e.message); }
+  }
+  if (wikiError) issues.push("Wikipedia nicht erreichbar: " + wikiError);
   const bad = round.items.some(it => it.questions.every(q => q.skip));
   if (bad) issues.push("Mindestens eine Art ganz ohne Frage.");
   const level = bad || s.pool.length === 0 ? "bad" : issues.length ? "warn" : "ok";
@@ -118,6 +130,7 @@ async function runCase(c) {
     group, place, levels, poolSize: s.pool.length, items: round.items.length, perLevel,
     requests: QuizData.requestCount() - r0, seconds: Math.round((Date.now() - t0) / 1000),
     regionalShare: distractors ? Math.round(100 * regional / distractors) : 0, sample, issues, level,
+    wiki: { checked: wikiChecked, found: wikiFound, german: wikiDe, error: wikiError },
     chains: round.items.map(it => ({ species: it.taxon.name, common: it.taxon.common, chain: Object.fromEntries(levels.map(l => [l, it.chain[l] ? it.chain[l].name : null])),
       options: (it.questions || []).map(q => q.options ? { rank: q.rank, names: q.options.map(o => o.name) } : { rank: q.rank, skip: q.skip }) }))
   };

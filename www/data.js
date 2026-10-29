@@ -241,8 +241,110 @@ const QuizData = (() => {
     return i;
   }
 
+  // ---------- Wikipedia ----------
+  // Abschnitte ab hier werden nicht mehr angezeigt (Quellen, Linklisten)
+  const WIKI_STOP = /^(literatur|weblinks|einzelnachweise|anmerkungen|quellen|belege|siehe auch|fußnoten|references|external links|further reading|see also|notes|bibliography|sources|footnotes)$/i;
+  const WIKI_TAGS = new Set(["P", "H2", "H3", "H4", "UL", "OL", "LI", "B", "I", "EM", "STRONG", "SUB", "SUP", "BR", "DL", "DT", "DD"]);
+  const WIKI_DROP = new Set(["SCRIPT", "STYLE", "TABLE", "FIGURE", "IMG", "MATH", "SVG", "IFRAME", "OBJECT", "NOSCRIPT", "TEMPLATE"]);
+
+  async function wikiFetch(lang, params) {
+    const u = new URL(`https://${lang}.wikipedia.org/w/api.php`);
+    const all = { action: "query", format: "json", formatversion: "2", origin: "*", ...params };
+    for (const [k, v] of Object.entries(all)) u.searchParams.set(k, v);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const r = await fetch(u, { signal: ctrl.signal });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async function wikiPage(lang, title, mustContain) {
+    const d = await wikiFetch(lang, {
+      titles: title, redirects: "1", prop: "extracts|pageimages|pageprops|info",
+      inprop: "url", ppprop: "disambiguation", piprop: "thumbnail|name", pithumbsize: "900"
+    });
+    const p = d.query && d.query.pages && d.query.pages[0];
+    if (!p || p.missing || p.invalid || !p.extract) return null;
+    if (p.pageprops && "disambiguation" in p.pageprops) return null;
+    if (mustContain && !p.extract.toLowerCase().includes(mustContain.toLowerCase())) return null;
+    return {
+      lang, title: p.title,
+      url: p.fullurl || `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(p.title.replace(/ /g, "_"))}`,
+      extract: p.extract, thumb: p.thumbnail ? p.thumbnail.source : null, imageName: p.pageimage || null
+    };
+  }
+  const plainText = html => html ? new DOMParser().parseFromString(html, "text/html").body.textContent.replace(/\s+/g, " ").trim() : "";
+  async function wikiImage(lang, name) {
+    const d = await wikiFetch(lang, {
+      titles: "File:" + name, prop: "imageinfo", iiprop: "url|extmetadata", iiurlwidth: "900",
+      iiextmetadatafilter: "Artist|LicenseShortName"
+    });
+    const p = d.query && d.query.pages && d.query.pages[0];
+    const ii = p && p.imageinfo && p.imageinfo[0];
+    if (!ii) return null;
+    const m = ii.extmetadata || {};
+    return {
+      url: ii.thumburl || ii.url, page: ii.descriptionurl || null,
+      artist: plainText(m.Artist && m.Artist.value), license: plainText(m.LicenseShortName && m.LicenseShortName.value)
+    };
+  }
+  // Artikel-HTML auf harmlose Textauszeichnung reduzieren, Quellenabschnitte abschneiden
+  function cleanArticle(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const out = document.createElement("div");
+    const copy = (from, into) => {
+      for (const n of from.childNodes) {
+        if (n.nodeType === 3) { into.append(n.textContent); continue; }
+        if (n.nodeType !== 1 || WIKI_DROP.has(n.tagName)) continue;
+        if (WIKI_TAGS.has(n.tagName)) { const e = document.createElement(n.tagName.toLowerCase()); copy(n, e); into.append(e); }
+        else copy(n, into);
+      }
+    };
+    copy(doc.body, out);
+    let stop = false;
+    for (const n of [...out.childNodes]) {
+      if (!stop && n.nodeType === 1 && /^H[2-4]$/.test(n.tagName) && WIKI_STOP.test(n.textContent.trim())) stop = true;
+      if (stop) n.remove();
+      else if (n.nodeType === 3 && !n.textContent.trim()) n.remove();
+      else if (n.nodeType === 1 && !n.textContent.trim() && n.tagName !== "BR") n.remove();
+    }
+    // Überschriften ohne Inhalt bis zur nächsten gleich- oder höherrangigen Überschrift entfernen
+    const kids = [...out.children];
+    kids.forEach((n, i) => {
+      if (!/^H[2-4]$/.test(n.tagName)) return;
+      const lvl = +n.tagName[1], next = kids[i + 1];
+      if (!next || (/^H[2-4]$/.test(next.tagName) && +next.tagName[1] <= lvl)) n.remove();
+    });
+    return out;
+  }
+  const wikiCache = new Map();
+  /* Sucht den Artikel: deutscher Artikel zum wissenschaftlichen Namen, dann zum deutschen Namen
+     (nur wenn der Gattungsname im Text vorkommt), dann englischer Artikel. null = keiner gefunden. */
+  function wikipedia(taxon) {
+    if (!wikiCache.has(taxon.id)) {
+      const p = (async () => {
+        let page = await wikiPage("de", taxon.name);
+        if (!page && taxon.common) page = await wikiPage("de", taxon.common, taxon.name.split(" ")[0]);
+        if (!page) page = await wikiPage("en", taxon.name);
+        if (!page) return null;
+        let image = null;
+        if (page.imageName) { try { image = await wikiImage(page.lang, page.imageName); } catch { /* Bild ohne Angaben */ } }
+        if (!image && page.thumb) image = { url: page.thumb, page: null, artist: "", license: "" };
+        const body = cleanArticle(page.extract);
+        if (!body.textContent.trim()) return null;
+        return { lang: page.lang, title: page.title, url: page.url, image, body };
+      })();
+      p.catch(() => wikiCache.delete(taxon.id));
+      wikiCache.set(taxon.id, p);
+    }
+    return wikiCache.get(taxon.id);
+  }
+
   return {
-    LIFE, RANKS, ITALIC, api, fetchTaxa, friendly,
+    LIFE, RANKS, ITALIC, api, fetchTaxa, friendly, wikipedia,
     searchGroup, findTaxon, searchPlace, findPlace,
     newSession, newRound, prepare, nextOpen, shuffle,
     requestCount: () => requests
