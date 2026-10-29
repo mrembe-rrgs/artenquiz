@@ -60,7 +60,7 @@ function openExternal(url) {
 }
 
 // ---------- Zustand ----------
-const DEFAULTS = { oben: "family", unten: "species", group: null, place: null, native: true, showCommon: true, wiki: true, lang: null };
+const DEFAULTS = { oben: "family", unten: "species", group: null, place: null, native: true, showCommon: true, wiki: true, lang: null, mode: "all" };
 let settings = Object.assign({}, DEFAULTS, store.get("settings", {}));
 if (!settings || typeof settings !== "object") settings = Object.assign({}, DEFAULTS);
 if (settings.lang !== "de" && settings.lang !== "en") settings.lang = I18N.detect();
@@ -70,11 +70,33 @@ if (!RANKS.includes(settings.oben) || !RANKS.includes(settings.unten)) Object.as
 if (settings.group && settings.group.rank !== groupRankFor(settings.oben)) settings.group = null;
 let stats = Object.assign({ rounds: 0, answered: 0, correct: 0, best: 0 }, store.get("stats", {}));
 let missed = store.get("missed", {});
+if (settings.mode !== "repeat") settings.mode = "all";
+// Lernstapel: { taxonId: { n: Name, c: Trivialname, a: Vorfahren-IDs, t: Zeitpunkt } }
+let stack = store.get("stack", {});
+if (!stack || typeof stack !== "object" || Array.isArray(stack)) stack = {};
+let stackVersion = 0;
 let screen = "setup", gen = 0, session = null, sessionKey = null, round = null, zoomEl = null;
 
 const saveSettings = () => store.set("settings", settings);
 const levelsNow = () => RANKS.slice(RANKS.indexOf(settings.oben), RANKS.indexOf(settings.unten) + 1);
 const groupNow = () => groupRankFor(settings.oben) ? settings.group : QuizData.LIFE;
+
+// ---------- Lernstapel ----------
+function stackIdsIn(group) {
+  if (!group) return [];
+  return Object.entries(stack)
+    .filter(([, e]) => group.id === QuizData.LIFE.id || (Array.isArray(e.a) && e.a.includes(group.id)))
+    .map(([id]) => +id);
+}
+function setStacked(item, on) {
+  const id = item.taxon.id;
+  if (on) stack[id] = { n: item.taxon.name, c: item.taxon.common, a: item.ancestors || [], t: Date.now() };
+  else delete stack[id];
+  const ids = Object.keys(stack);
+  if (ids.length > 2000) ids.sort((x, y) => stack[x].t - stack[y].t).slice(0, ids.length - 2000).forEach(k => delete stack[k]);
+  store.set("stack", stack);
+  stackVersion++;
+}
 
 // ---------- Sprache ----------
 async function switchLang(l) {
@@ -219,6 +241,14 @@ function showSetup(message) {
       h("input", { type: "checkbox", checked: settings.native, disabled: !settings.place, onchange: e => { settings.native = e.target.checked; saveSettings(); } }),
       t("nativeOnly")));
 
+  const stackCount = (!gr || settings.group) ? stackIdsIn(groupNow()).length : 0;
+  const repeat = settings.mode === "repeat";
+  const modeField = h("section", { class: "field" }, h("h2", { text: t("whichSpecies") }),
+    h("div", { class: "chips" },
+      h("button", { type: "button", class: "chip" + (!repeat ? " on" : ""), "aria-pressed": String(!repeat), onclick: () => { settings.mode = "all"; saveSettings(); showSetup(); } }, t("modeAll")),
+      h("button", { type: "button", class: "chip" + (repeat ? " on" : ""), "aria-pressed": String(repeat), onclick: () => { settings.mode = "repeat"; saveSettings(); showSetup(); } }, t("modeRepeat", stackCount))),
+    repeat ? h("p", { class: "hint", style: "margin-top:8px", text: stackCount ? t("repeatHint") : t("stackEmptyGroup") }) : null);
+
   const extraField = h("section", { class: "field" },
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: settings.showCommon, onchange: e => { settings.showCommon = e.target.checked; saveSettings(); } }),
@@ -227,16 +257,16 @@ function showSetup(message) {
       h("input", { type: "checkbox", checked: settings.wiki, onchange: e => { settings.wiki = e.target.checked; saveSettings(); } }),
       t("showWiki")));
 
-  const ready = !gr || !!settings.group;
+  const ready = (!gr || !!settings.group) && !(repeat && stackCount === 0);
   const pct = stats.answered ? Math.round(100 * stats.correct / stats.answered) : null;
   $app.replaceChildren(h("main", { class: "setup" },
     h("header", { class: "masthead" },
       h("div", { class: "masthead-row" }, h("h1", { text: t("appTitle") }), langSwitch()),
       h("p", { class: "lead", text: t("lead") })),
-    stepsField, groupField, placeField, extraField,
+    stepsField, groupField, placeField, modeField, extraField,
     message ? h("p", { class: "error-text", role: "alert", text: message }) : null,
     h("button", { type: "button", class: "btn", disabled: !ready, onclick: () => startRound() }, t("start")),
-    !ready ? h("p", { class: "hint center-text", text: t("pickGroupFirst") }) : null,
+    gr && !settings.group ? h("p", { class: "hint center-text", text: t("pickGroupFirst") }) : null,
     pct !== null ? h("p", { class: "stats", text: t("stats", stats.rounds, pct, stats.best) }) : null,
     h("p", { class: "footer" }, h("a", { href: "selbsttest.html" }, t("checkSource")), " · " + t("dataBy"))));
 }
@@ -261,16 +291,20 @@ function showError(e, retry) {
 async function startRound() {
   const my = ++gen;
   // Sprache gehört zum Schlüssel: Trivialnamen im Artenpool sind sprachabhängig
-  const key = JSON.stringify([groupNow().id, settings.place && settings.place.id, !!(settings.place && settings.native), settings.lang]);
+  const repeat = settings.mode === "repeat";
+  const onlyIds = repeat ? stackIdsIn(groupNow()) : null;
+  if (repeat && !onlyIds.length) return showSetup(t("stackEmptyGroup"));
+  const key = JSON.stringify([groupNow().id, settings.place && settings.place.id, !!(settings.place && settings.native), settings.lang,
+    settings.mode, repeat ? stackVersion : 0]);
   if (!session || sessionKey !== key) {
-    session = QuizData.newSession({ group: groupNow(), place: settings.place, native: settings.native });
+    session = QuizData.newSession({ group: groupNow(), place: settings.place, native: settings.native, onlyIds });
     sessionKey = key;
   }
   showLoading(t("loadPicking"));
   try {
     const res = await QuizData.newRound(session, { levels: levelsNow(), size: ROUND_SIZE, missed, isStale: () => my !== gen });
     if (!res || my !== gen) return;
-    if (res.empty) return showSetup(t("emptyPool"));
+    if (res.empty) return showSetup(repeat ? t("stackNoneHere") : t("emptyPool"));
     round = { gen: my, items: res.items, repeated: res.repeated, idx: 0, score: 0, possible: 0, streak: 0 };
     prefetch(round);
     showLoading(t("loadPreparing"));
@@ -349,6 +383,9 @@ function update(item, ui) {
       h("h2", { text: item.taxon.name }),
       item.taxon.common ? h("p", { class: "common-big", text: item.taxon.common }) : null,
       item.questions.some(q => q.skip) ? h("p", { class: "hint", text: t("skippedHint") }) : null,
+      h("label", { class: "check stackcheck" },
+        h("input", { type: "checkbox", checked: !!stack[item.taxon.id], onchange: e => setStacked(item, e.target.checked) }),
+        t("onStack")),
       h("div", { class: "links" }, wikiLink,
         h("button", { type: "button", class: "textbtn", onclick: () => openExternal(item.inat) }, t("moreInat"))),
       article,
@@ -409,6 +446,7 @@ function finishItem(item) {
   item.allRight = !item.anyWrong;
   const id = item.taxon.id;
   if (item.anyWrong) missed[id] = Math.min(3, (missed[id] || 0) + 1);
+  if (item.anyWrong && !stack[id]) setStacked(item, true); // Haken ist vorgesetzt, lässt sich abwählen
   else if (missed[id]) { missed[id]--; if (!missed[id]) delete missed[id]; }
   const keys = Object.keys(missed);
   if (keys.length > 2000) keys.slice(0, keys.length - 2000).forEach(k => delete missed[k]);
@@ -471,7 +509,8 @@ function showEnd() {
         }))))))),
     h("button", { type: "button", class: "btn", onclick: () => startRound() }, t("nextRound")),
     h("button", { type: "button", class: "btn secondary", onclick: () => showSetup() }, t("changeSetup")),
-    Object.keys(missed).length ? h("p", { class: "hint center-text", text: t("missedHint") }) : null));
+    Object.keys(missed).length ? h("p", { class: "hint center-text", text: t("missedHint") }) : null,
+    Object.keys(stack).length ? h("p", { class: "hint center-text", text: t("stackTotal", Object.keys(stack).length) }) : null));
   window.scrollTo(0, 0);
 }
 

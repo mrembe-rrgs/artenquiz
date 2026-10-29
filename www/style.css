@@ -168,6 +168,7 @@ input[type="search"] {
 
 .reveal > h2 { font-family: var(--serif); font-style: italic; font-weight: 600; font-size: 1.6rem; line-height: 1.2; margin: 4px 0 2px; }
 .reveal .common-big { color: var(--muted); margin: 0 0 8px; }
+.reveal .stackcheck { margin: 6px 0 2px; font-weight: 600; }
 .reveal .links { display: flex; column-gap: 20px; row-gap: 0; flex-wrap: wrap; }
 .reveal .nextbar {
   position: sticky; bottom: 0; z-index: 2; margin-top: 12px;

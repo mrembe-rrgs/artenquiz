@@ -110,29 +110,50 @@ const QuizData = (() => {
   }
 
   // ---------- Artenpool ----------
-  function newSession({ group, place, native }) {
+  /* onlyIds: nur diese Arten (Lernstapel) – Gruppe, Ort und „heimisch“ gelten trotzdem */
+  function newSession({ group, place, native, onlyIds }) {
     return {
       group: group || LIFE, place: place || null, native: !!(place && native),
+      onlyIds: onlyIds && onlyIds.length ? onlyIds.slice() : null, ctx: [],
       pool: [], page: 0, poolDone: false, seen: new Set(),
       regional: new Set(), poolHasAnc: false, sib: new Map(), anc: new Map()
     };
   }
+  const STACK_CHUNK = 150;
+  function noteRegional(s, t) {
+    s.regional.add(t.id);
+    if (Array.isArray(t.ancestor_ids)) { s.poolHasAnc = true; t.ancestor_ids.forEach(id => s.regional.add(id)); }
+  }
   async function loadPoolPage(s) {
     const page = s.page + 1;
-    const d = await api("/observations/species_counts", {
-      taxon_id: s.group.id, place_id: s.place && s.place.id, native: s.native ? "true" : undefined,
-      quality_grade: "research", per_page: 500, page
-    });
-    s.page = page; // erst nach Erfolg weiterzählen, sonst überspringt „Erneut versuchen“ eine Seite
-    const res = d.results || [];
+    const filter = { place_id: s.place && s.place.id, native: s.native ? "true" : undefined, quality_grade: "research" };
+    let res;
+    if (s.onlyIds) {
+      // Wiederholen: einmal die häufigsten Arten der Auswahl laden – sie liefern regionale Falschantworten
+      if (page === 1 && !s.ctxLoaded) {
+        const c = await api("/observations/species_counts", { taxon_id: s.group.id, ...filter, per_page: 200 });
+        s.ctx = (c.results || []).map(r => r.taxon).filter(t => t && t.rank === "species");
+        s.ctx.forEach(t => noteRegional(s, t));
+        s.ctxLoaded = true;
+      }
+      const chunk = s.onlyIds.slice((page - 1) * STACK_CHUNK, page * STACK_CHUNK);
+      const d = await api("/observations/species_counts", { taxon_id: chunk.join(","), ...filter, per_page: 500 });
+      const want = new Set(chunk);
+      res = (d.results || []).filter(r => r.taxon && want.has(r.taxon.id));
+      s.page = page;
+      if (page * STACK_CHUNK >= s.onlyIds.length) s.poolDone = true;
+    } else {
+      const d = await api("/observations/species_counts", { taxon_id: s.group.id, ...filter, per_page: 500, page });
+      s.page = page; // erst nach Erfolg weiterzählen, sonst überspringt „Erneut versuchen“ eine Seite
+      res = d.results || [];
+      if (res.length < 500 || s.page >= MAX_POOL_PAGES) s.poolDone = true;
+    }
     for (const r of res) {
       const t = r.taxon;
       if (!t || t.rank !== "species" || !t.default_photo) continue;
       s.pool.push({ count: r.count || 1, taxon: t });
-      s.regional.add(t.id);
-      if (Array.isArray(t.ancestor_ids)) { s.poolHasAnc = true; t.ancestor_ids.forEach(id => s.regional.add(id)); }
+      noteRegional(s, t);
     }
-    if (res.length < 500 || s.page >= MAX_POOL_PAGES) s.poolDone = true;
   }
   // gewichtete Ziehung ohne Zurücklegen (Efraimidis–Spirakis)
   function weightedSample(arr, n, weight) {
@@ -187,6 +208,7 @@ const QuizData = (() => {
     const ph = t.default_photo || p.taxon.default_photo;
     return {
       taxon: slim(t), count: p.count, chain, levels,
+      ancestors: (t.ancestor_ids || p.taxon.ancestor_ids || []).slice(),
       plantLike: (t.ancestor_ids || p.taxon.ancestor_ids || []).some(id => PLANT_LIKE.includes(id)),
       photo: ph ? { url: ph.medium_url || ph.url, attribution: ph.attribution || "", license: ph.license_code || "" } : null,
       inat: "https://www.inaturalist.org/taxa/" + t.id,
@@ -213,7 +235,9 @@ const QuizData = (() => {
           if (!correct) { qs.push({ rank: L, skip: "missing" }); continue; }
           let others = [];
           if (L === "species" && s.poolHasAnc) {
-            others = s.pool.map(p => p.taxon)
+            const seenIds = new Set();
+            others = s.pool.map(p => p.taxon).concat(s.ctx)
+              .filter(t => !seenIds.has(t.id) && seenIds.add(t.id))
               .filter(t => t.id !== correct.id && (t.ancestor_ids || []).includes(parent.id))
               .map(t => ({ ...slim(t), regional: true }));
           }
