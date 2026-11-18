@@ -1,0 +1,106 @@
+name: iPhone-App bauen
+
+# Baut eine unsignierte .ipa zum Sideloaden mit SideStore/AltStore (kostenlose Apple-ID).
+# Die Signatur übernimmt SideStore/AltStore beim Installieren auf dem iPhone.
+#
+# Wann gebaut wird:
+#  - öffentliches Repo: bei jedem Push auf main (Actions-Minuten sind dort frei)
+#  - privates Repo: macOS-Minuten zählen zehnfach gegen das Freikontingent, daher nur
+#    wenn „[ios]“ in der Commit-Nachricht steht oder der Lauf unter Actions von Hand
+#    gestartet wird („Run workflow“)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private || contains(github.event.head_commit.message, '[ios]')
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Abhängigkeiten installieren
+        run: |
+          set -o pipefail
+          npm install 2>&1 | tee -a build.log
+
+      - name: iOS-Projekt erzeugen
+        run: |
+          set -o pipefail
+          {
+            [ -d ios ] || npx cap add ios
+            npx cap sync ios
+          } 2>&1 | tee -a build.log
+
+      - name: iOS anpassen (Version, Ton, Mikrofon)
+        run: |
+          set -eo pipefail
+          P=ios/App/App/Info.plist
+          # Versionsnummer wie bei Android hochzählen
+          plutil -replace CFBundleShortVersionString -string "0.1.${{ github.run_number }}" "$P"
+          plutil -replace CFBundleVersion -string "${{ github.run_number }}" "$P"
+          # Ton auch bei stummgeschaltetem iPhone (Seitenschalter) abspielen
+          # und andere Musik-Apps nicht unterbrechen
+          D=ios/App/App/AppDelegate.swift
+          grep -q "import AVFoundation" "$D" || perl -0pi -e 's/import UIKit\n/import UIKit\nimport AVFoundation\n/' "$D"
+          grep -q "AVAudioSession" "$D" || perl -0pi -e 's/(didFinishLaunchingWithOptions[^{]*\{\n)/$1        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])\n/' "$D"
+          grep -n "AVAudioSession\|import" "$D" | tee -a build.log
+          grep -q "AVAudioSession" "$D"
+
+      - name: App-Icon und Startbild erzeugen
+        continue-on-error: true
+        run: npx @capacitor/assets generate --ios 2>&1 | tee -a build.log
+
+      - name: App bauen (unsigniert)
+        working-directory: ios/App
+        run: |
+          set -o pipefail
+          if [ -d App.xcworkspace ]; then SRC="-workspace App.xcworkspace"; else SRC="-project App.xcodeproj"; fi
+          xcodebuild $SRC -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee -a ../../build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          test -d "$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/App.app"
+
+      - name: .ipa packen
+        run: |
+          mkdir -p Payload
+          cp -R "$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/App.app" Payload/
+          zip -qry artenquiz.ipa Payload
+          ls -la artenquiz.ipa
+
+      - name: .ipa als Release „neueste-ios“ bereitstellen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete neueste-ios --yes --cleanup-tag || true
+          gh release create neueste-ios artenquiz.ipa \
+            --title "Artenquiz (iPhone) – Build ${{ github.run_number }}" \
+            --notes "Automatisch gebaut aus ${{ github.sha }}. Auf dem iPhone artenquiz.ipa herunterladen und mit SideStore oder AltStore installieren (unsigniert, SideStore/AltStore signiert mit deiner Apple-ID)." \
+            --prerelease
+
+      # Bei Fehlern das Ende des Protokolls als Hinweis anzeigen (sichtbar in der Übersicht des Laufs)
+      - name: Fehlerprotokoll
+        if: failure()
+        run: |
+          [ -f build.log ] || echo "kein Protokoll" > build.log
+          grep -iE "error|failed|exception" build.log | tail -n 40 > err.txt || true
+          tail -n 60 build.log > tail.txt
+          msg=$(cat err.txt; echo "-----"; cat tail.txt)
+          msg="${msg//'%'/'%25'}"; msg="${msg//$'\n'/'%0A'}"; msg="${msg//$'\r'/'%0D'}"
+          echo "::error title=Build-Protokoll::${msg}"
