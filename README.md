@@ -32,3 +32,11 @@ Android-App zum Üben der Artenkenntnis. Zu jedem Foto bestimmt man Stufe für S
 ## Datenquelle
 
 Die App fragt die öffentliche iNaturalist-API ab, höchstens etwa eine Anfrage pro Sekunde. Fotos stehen unter den jeweils angezeigten Creative-Commons-Lizenzen.
+
+## Auf dem iPhone installieren
+
+`.github/workflows/ios.yml` baut bei jedem Push auf `main` zusätzlich eine unsignierte `artenquiz.ipa` und legt sie unter **Releases → neueste-ios** ab. Installiert wird sie mit SideStore (oder AltStore/Sideloadly), das die App mit einer kostenlosen Apple-ID signiert:
+
+1. SideStore einmalig einrichten (dafür braucht es einmal einen Computer, z. B. mit iloader).
+2. Auf dem iPhone `artenquiz.ipa` aus **Releases → neueste-ios** herunterladen und in SideStore unter „My Apps“ mit **+** installieren.
+3. Mit kostenloser Apple-ID läuft die Signatur nach 7 Tagen ab; SideStore erneuert sie per „Refresh“. Es sind höchstens 3 Apps gleichzeitig aktiv (SideStore selbst zählt mit).

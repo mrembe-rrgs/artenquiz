@@ -3,11 +3,9 @@ name: iPhone-App bauen
 # Baut eine unsignierte .ipa zum Sideloaden mit SideStore/AltStore (kostenlose Apple-ID).
 # Die Signatur übernimmt SideStore/AltStore beim Installieren auf dem iPhone.
 #
-# Wann gebaut wird:
-#  - öffentliches Repo: bei jedem Push auf main (Actions-Minuten sind dort frei)
-#  - privates Repo: macOS-Minuten zählen zehnfach gegen das Freikontingent, daher nur
-#    wenn „[ios]“ in der Commit-Nachricht steht oder der Lauf unter Actions von Hand
-#    gestartet wird („Run workflow“)
+# Läuft bei jedem Push auf main mit, parallel zum Android-Build.
+# Hinweis: macOS-Minuten zählen bei privaten Repos zehnfach gegen das Freikontingent
+# (ein Build ≈ 2–3 min, also ≈ 25 Freiminuten).
 
 on:
   push:
@@ -23,7 +21,6 @@ concurrency:
 
 jobs:
   ipa:
-    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private || contains(github.event.head_commit.message, '[ios]')
     runs-on: macos-15
     timeout-minutes: 40
     steps:
